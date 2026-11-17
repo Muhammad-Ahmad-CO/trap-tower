@@ -1,0 +1,6 @@
+# Generated / local-only files (never committed).
+godot/assets/icon.png
+godot/assets/icon.png.import
+godot/.godot/
+godot/build/
+godot/debug.keystore
