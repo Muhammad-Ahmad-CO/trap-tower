@@ -1,37 +1,38 @@
 extends Control
 
 # World map: the START screen (no separate title screen). Code-drawn
-# island map in flat palette-0 colours: door arches along a winding
-# dotted snake path, the current door glowing with a small triangle
-# marker above it, locked doors dimmed + unclickable. Door tap opens a
-# 5-stage picker; the PLAY badge on the current door starts its first
-# incomplete stage (else stage 1). Settings wrench top-right.
-# Behaviour follows the Level Devil study; all art here is original
-# (our colours, our door shape, our layout) — nothing is copied.
-# Door count derives from levels.json (ceil(total / 5)); the map is
-# taller than 720, so it lives in a vertical ScrollContainer.
-# open_picker(door) / open_settings() are public: the screenshot tool
+# island map in flat palette-0 colours: one small arch node per level
+# (215 in shipped order) along a winding dotted snake path, the current
+# level glowing with a small triangle marker above it, completed levels
+# marked with a check badge, locked levels dimmed + unclickable. Each
+# node is filled with its own level's palette trap colour, so archetype
+# groups read as colour bands. Tapping an unlocked node plays exactly
+# that level; tapping a locked node does nothing. Settings wrench
+# top-right; "Made by Ahmed" in the fixed header and at the map bottom.
+# Node count derives from levels.json; the map is taller than 720, so it
+# lives in a vertical ScrollContainer with a computed content height.
+# open_settings() / close_settings() are public: the screenshot tool
 # drives these real paths. Audio settings are applied and music is
 # started in _ready.
 
-const COLS := 6
-const ROW_H := 170.0
-const DOOR_W := 130.0
-const DOOR_H := 170.0
-const GRID_X0 := 60.0
-const GRID_DX := 206.0
+const COLS := 9
+const ROW_H := 140.0
+const NODE_W := 110.0
+const NODE_H := 110.0
+const GRID_X0 := 57.0
+const GRID_DX := 132.0
 const GRID_Y0 := 60.0
 
 
-# One door arch on the map. Release-activated (see IconButton note):
+# One level node on the map. Release-activated (see IconButton note):
 # the press is never accepted, so a drag still scrolls the map.
-class DoorButton extends Control:
+class LevelNode extends Control:
 	signal pressed
-	signal play_pressed
 
-	var door := 0
+	var level := 0
 	var locked := false
 	var current := false
+	var done := false
 	var fill := Color(0.17, 0.04, 0.54)
 	var outline_col := Color.WHITE
 	var number_col := Color.WHITE
@@ -44,9 +45,6 @@ class DoorButton extends Control:
 		mouse_filter = Control.MOUSE_FILTER_STOP
 		focus_mode = Control.FOCUS_NONE
 
-	func badge_rect() -> Rect2:
-		return Rect2(Vector2(size.x - 50.0, 2.0), Vector2(46, 46))
-
 	func _gui_input(event: InputEvent) -> void:
 		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
@@ -56,21 +54,18 @@ class DoorButton extends Control:
 				var fire: bool = _press_inside and Rect2(Vector2.ZERO, size).has_point(event.position) and event.position.distance_to(_press_pos) <= 16.0
 				_press_inside = false
 				if fire and not locked:
-					if current and badge_rect().has_point(event.position):
-						play_pressed.emit()
-					else:
-						pressed.emit()
+					pressed.emit()
 
 	func _draw() -> void:
 		var cx := size.x * 0.5
 		if current:
-			draw_circle(Vector2(cx, 92), 92.0, glow_col)
-			var tri := PackedVector2Array([Vector2(cx - 14, 2), Vector2(cx + 14, 2), Vector2(cx, 22)])
+			draw_circle(Vector2(cx, 58), 56.0, glow_col)
+			var tri := PackedVector2Array([Vector2(cx - 14, 2), Vector2(cx + 14, 2), Vector2(cx, 20)])
 			draw_colored_polygon(tri, marker_col)
-		var aw := 84.0
-		var ah := 112.0
+		var aw := 76.0
+		var ah := 76.0
 		var ax := cx - aw * 0.5
-		var ay := 40.0
+		var ay := 28.0
 		var rad := aw * 0.5
 		var cy := ay + rad
 		draw_circle(Vector2(cx, cy), rad, fill)
@@ -81,25 +76,20 @@ class DoorButton extends Control:
 		if current:
 			draw_arc(Vector2(cx, cy), rad + 3.0, PI, TAU, 20, marker_col, 3.0, true)
 		var font := get_theme_default_font()
-		draw_string(font, Vector2(0, ay + 78.0), str(door + 1), HORIZONTAL_ALIGNMENT_CENTER, size.x, 34, number_col)
-		if current:
-			var b := badge_rect()
-			draw_circle(b.get_center(), 21.0, marker_col)
-			var bc := b.get_center()
-			var play := PackedVector2Array([
-				Vector2(bc.x - 6, bc.y - 10),
-				Vector2(bc.x - 6, bc.y + 10),
-				Vector2(bc.x + 11, bc.y),
-			])
-			draw_colored_polygon(play, fill)
+		draw_string(font, Vector2(0, ay + 49.0), str(level + 1), HORIZONTAL_ALIGNMENT_CENTER, size.x, 30, number_col)
+		if done and not locked:
+			var bc := Vector2(size.x - 18.0, 18.0)
+			draw_circle(bc, 11.0, Color.WHITE)
+			draw_line(bc + Vector2(-6, 0), bc + Vector2(-2, 4), fill, 3.0, true)
+			draw_line(bc + Vector2(-2, 4), bc + Vector2(6, -5), fill, 3.0, true)
 
 
-# Island blob + dotted path behind the doors. Never interactive.
+# Island blob + dotted path behind the nodes. Never interactive.
 class MapArt extends Control:
 	var island_col := Color.html("E8871E")
 	var dot_col := Color.html("2B0A8A")
 	var centres: Array[Vector2] = []
-	var content_h := 1600.0
+	var content_h := 3520.0
 
 	func _draw() -> void:
 		var sb := StyleBoxFlat.new()
@@ -117,18 +107,13 @@ class MapArt extends Control:
 
 var _levels: Array = []
 var _total := 0
-var _doors := 0
 var _highest := 0
 var _completed: Array = []
+var _tuning: Dictionary = {}
 var _bg_col := Color.html("E8871E")
 var _trap_col := Color.html("2B0A8A")
 var _scroll: ScrollContainer = null
-var _content_h := 1600.0
-var _current_door := 0
-var _picker: Control = null
-var _picker_title: Label = null
-var _picker_stages: Control = null
-var _picker_door := -1
+var _content_h := 3520.0
 var _settings: Control = null
 var _sound_btn: Button = null
 var _music_slider: HSlider = null
@@ -136,8 +121,8 @@ var _music_slider: HSlider = null
 
 func _ready() -> void:
 	TTAudio.ensure_audio(get_tree())
-	var tuning := TTuning.load_tuning()
-	var pal: Dictionary = TTuning.palette(tuning, 0)
+	_tuning = TTuning.load_tuning()
+	var pal: Dictionary = TTuning.palette(_tuning, 0)
 	_bg_col = TTuning.col(str(pal.get("bg", "#E8871E")))
 	_trap_col = TTuning.col(str(pal.get("trap", "#2B0A8A")))
 	var bg := ColorRect.new()
@@ -154,6 +139,15 @@ func _ready() -> void:
 	title.add_theme_color_override("font_color", _bg_col)
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(title)
+	var credit_top := Label.new()
+	credit_top.text = "Made by Ahmed"
+	credit_top.position = Vector2(0, 80)
+	credit_top.size = Vector2(1280, 24)
+	credit_top.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	credit_top.add_theme_font_size_override("font_size", 18)
+	credit_top.add_theme_color_override("font_color", _bg_col)
+	credit_top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(credit_top)
 	var wrench := TTHUD.IconButton.new()
 	wrench.icon = "wrench"
 	wrench.fill = _bg_col
@@ -172,32 +166,28 @@ func _ready() -> void:
 		err.add_theme_font_size_override("font_size", 32)
 		err.add_theme_color_override("font_color", _bg_col)
 		add_child(err)
-		_build_picker()
 		_build_settings()
 		return
 	_levels = loaded["levels"]
 	_total = _levels.size()
-	_doors = (_total + 4) / 5
 	var progress := TTProgress.load_progress()
 	_highest = clampi(int(progress["highest_unlocked"]), 0, maxi(0, _total - 1))
 	_completed = progress["completed"]
-	# Door unlock derives from highest_unlocked (index), never completed.
-	_current_door = _highest / 5
+	# Unlock derives from highest_unlocked (index), never completed.
 	_build_map()
-	_build_picker()
 	_build_settings()
 	_scroll_to_current()
 
 
-func _door_pos(door: int) -> Vector2:
-	var row := door / COLS
-	var slot := door % COLS
+func _node_pos(idx: int) -> Vector2:
+	var row := idx / COLS
+	var slot := idx % COLS
 	var col := slot if row % 2 == 0 else COLS - 1 - slot
 	return Vector2(GRID_X0 + float(col) * GRID_DX, GRID_Y0 + float(row) * ROW_H)
 
 
 func _build_map() -> void:
-	var rows := (_doors + COLS - 1) / COLS
+	var rows := (_total + COLS - 1) / COLS
 	_content_h = GRID_Y0 + float(rows) * ROW_H + 100.0
 	_scroll = ScrollContainer.new()
 	_scroll.position = Vector2(0, 104)
@@ -217,26 +207,29 @@ func _build_map() -> void:
 	art.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(art)
 	var centres: Array[Vector2] = []
-	for door in range(_doors):
-		centres.append(_door_pos(door) + Vector2(DOOR_W * 0.5, 92.0))
+	for idx in range(_total):
+		centres.append(_node_pos(idx) + Vector2(NODE_W * 0.5, 62.0))
 	art.centres = centres
-	for door in range(_doors):
-		var btn := DoorButton.new()
-		btn.door = door
-		btn.locked = door * 5 > _highest
-		btn.current = door == _current_door
+	for idx in range(_total):
+		var level: Dictionary = _levels[idx]
+		var pal: Dictionary = TTuning.palette(_tuning, int(level.get("palette", 0)))
+		var trap := TTuning.col(str(pal.get("trap", "#2B0A8A")))
+		var btn := LevelNode.new()
+		btn.level = idx
+		btn.locked = idx > _highest
+		btn.current = idx == _highest
+		btn.done = _completed.has(str(level.get("id", "")))
 		if btn.locked:
-			btn.fill = _trap_col.lerp(_bg_col, 0.45)
+			btn.fill = trap.lerp(_bg_col, 0.45)
 			btn.outline_col = Color(1, 1, 1, 0.55)
 			btn.number_col = Color(1, 1, 1, 0.6)
 		else:
-			btn.fill = _trap_col
+			btn.fill = trap
 			btn.outline_col = Color.WHITE
 			btn.number_col = Color.WHITE
-		btn.position = _door_pos(door)
-		btn.size = Vector2(DOOR_W, DOOR_H)
-		btn.pressed.connect(_on_door_pressed.bind(door))
-		btn.play_pressed.connect(_on_door_play.bind(door))
+		btn.position = _node_pos(idx)
+		btn.size = Vector2(NODE_W, NODE_H)
+		btn.pressed.connect(_on_level_pressed.bind(idx))
 		content.add_child(btn)
 	var credit := Label.new()
 	credit.text = "Made by Ahmed"
@@ -256,101 +249,8 @@ func _scroll_to_current() -> void:
 	await get_tree().process_frame
 	if _scroll == null or not is_instance_valid(_scroll):
 		return
-	var y := _door_pos(_current_door).y
+	var y := _node_pos(_highest).y
 	_scroll.scroll_vertical = clampf(y - 180.0, 0.0, maxf(0.0, _content_h - 616.0))
-
-
-func _build_picker() -> void:
-	_picker = Control.new()
-	_picker.position = Vector2.ZERO
-	_picker.size = Vector2(1280, 720)
-	_picker.visible = false
-	add_child(_picker)
-	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.5)
-	dim.position = Vector2.ZERO
-	dim.size = Vector2(1280, 720)
-	_picker.add_child(dim)
-	var panel := Panel.new()
-	panel.position = Vector2(250, 140)
-	panel.size = Vector2(780, 440)
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = _bg_col.lightened(0.45)
-	sb.set_corner_radius_all(24)
-	panel.add_theme_stylebox_override("panel", sb)
-	_picker.add_child(panel)
-	_picker_title = Label.new()
-	_picker_title.position = Vector2(250, 162)
-	_picker_title.size = Vector2(780, 60)
-	_picker_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_picker_title.add_theme_font_size_override("font_size", 44)
-	_picker_title.add_theme_color_override("font_color", _trap_col)
-	_picker_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_picker.add_child(_picker_title)
-	_picker_stages = Control.new()
-	_picker_stages.position = Vector2.ZERO
-	_picker_stages.size = Vector2(1280, 720)
-	_picker_stages.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_picker.add_child(_picker_stages)
-	var close := _make_text_button("CLOSE", Vector2(530, 472), Vector2(220, 64), 30, _trap_col, Color.html("FFD23F"))
-	close.pressed.connect(close_picker)
-	_picker.add_child(close)
-
-
-func open_picker(door: int) -> void:
-	if _picker == null or door < 0 or door >= _doors:
-		return
-	if door * 5 > _highest:
-		return
-	_picker_door = door
-	_refresh_picker()
-	_picker.visible = true
-
-
-func close_picker() -> void:
-	if _picker != null:
-		_picker.visible = false
-
-
-func _refresh_picker() -> void:
-	_picker_title.text = "DOOR %d" % (_picker_door + 1)
-	for child in _picker_stages.get_children():
-		_picker_stages.remove_child(child)
-		child.queue_free()
-	var stages := mini(5, _total - _picker_door * 5)
-	for s in range(stages):
-		var idx := _picker_door * 5 + s
-		var level: Dictionary = _levels[idx]
-		var done := _completed.has(str(level.get("id", "")))
-		var unlocked := idx <= _highest
-		var is_current := idx == _highest
-		var b := Button.new()
-		b.text = str(s + 1)
-		b.position = Vector2(300 + s * 140, 260)
-		b.size = Vector2(120, 120)
-		b.add_theme_font_size_override("font_size", 44)
-		var cell := StyleBoxFlat.new()
-		cell.set_corner_radius_all(16)
-		if done:
-			cell.bg_color = _trap_col
-			b.add_theme_color_override("font_color", Color.WHITE)
-		elif unlocked:
-			cell.bg_color = Color(1, 1, 1, 0.92)
-			b.add_theme_color_override("font_color", _trap_col)
-		else:
-			cell.bg_color = Color(0, 0, 0, 0.25)
-			b.add_theme_color_override("font_color", Color(1, 1, 1, 0.6))
-			b.disabled = true
-		if is_current:
-			cell.border_color = Color.html("FFD23F")
-			cell.set_border_width_all(5)
-		b.add_theme_stylebox_override("normal", cell)
-		b.add_theme_stylebox_override("hover", cell)
-		b.add_theme_stylebox_override("pressed", cell)
-		b.add_theme_stylebox_override("disabled", cell)
-		b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-		b.pressed.connect(_on_stage_pressed.bind(idx))
-		_picker_stages.add_child(b)
 
 
 func _build_settings() -> void:
@@ -455,27 +355,13 @@ func _make_text_button(text: String, pos: Vector2, size: Vector2, font_size: int
 	return b
 
 
-func _on_door_pressed(door: int) -> void:
-	open_picker(door)
+func _on_level_pressed(idx: int) -> void:
+	if idx < 0 or idx >= _total or idx > _highest:
+		return
+	_start_level(idx)
 
 
-func _on_door_play(door: int) -> void:
-	var start := door * 5
-	var stages := mini(5, _total - door * 5)
-	for s in range(stages):
-		var idx := door * 5 + s
-		var level: Dictionary = _levels[idx]
-		if idx <= _highest and not _completed.has(str(level.get("id", ""))):
-			start = idx
-			break
-	_start_stage(start)
-
-
-func _on_stage_pressed(idx: int) -> void:
-	_start_stage(idx)
-
-
-func _start_stage(idx: int) -> void:
+func _start_level(idx: int) -> void:
 	TTState.level_index = idx
 	get_tree().paused = false
 	get_tree().change_scene_to_file("res://scenes/game.tscn")

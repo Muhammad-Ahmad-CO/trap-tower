@@ -1,12 +1,15 @@
 class_name TTLevelData
 extends RefCounted
 
-# Strict runtime validation of res://data/levels.json per LEVEL_SCHEMA.md v1.
-# Mirrors tools/check_levels.py rules (a)-(c): versions, fields, unknown
+# Strict runtime validation of res://data/levels.json per LEVEL_SCHEMA.md v2.
+# Mirrors tools/check_levels.py rules 1-4: versions, fields, unknown
 # kind/type = hard error, bounds, safe zones, standing on solid ground.
 # Fail fast: any error returns a message; the Game scene refuses to load.
+# Rules 7-8 (grounding, HUD keep-out) are WARN-AND-LOAD here: see
+# validate_visual_rules. They never block loading; the harness enforces
+# them hard. Rule 9 (density) is harness-only and is not checked here.
 
-const SCHEMA_VERSION := 1
+const SCHEMA_VERSION := 2
 const SAFE_ZONE := 40.0
 const GROUND_TOL := 4.0
 const MIN_PLATFORM_H := 16.0
@@ -17,6 +20,12 @@ const DASHED_MIN_OFF := 0.5
 const FALL_MIN_STAND := 0.45
 const MOVING_MIN_PERIOD := 1.6
 const MIN_DELAY := 0.25
+const HUD_KEEPOUT_Y := 90.0
+const SPAWN_MIN_Y := 134.0
+const DOOR_MIN_Y := 174.0
+const SHAFT_TOL := 8.0
+const REST_OVERLAP := 48.0
+const SWING_SAMPLES := 13
 
 const PLATFORM_KINDS = ["solid", "dashed", "falling", "tilting", "moving"]
 const HAZARD_TYPES = ["spikes", "saw", "spiked_column", "hanging_pillar", "dotted_line"]
@@ -26,17 +35,23 @@ const STABLE_KINDS = ["solid", "moving"]
 
 static func load_levels(path := "res://data/levels.json") -> Dictionary:
 	if not FileAccess.file_exists(path):
-		return {"levels": [], "error": "levels file missing: " + path}
+		return {"levels": [], "error": "levels file missing: " + path, "warnings": []}
 	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
 	if typeof(parsed) != TYPE_DICTIONARY:
-		return {"levels": [], "error": "levels.json is not a JSON object"}
+		return {"levels": [], "error": "levels.json is not a JSON object", "warnings": []}
 	var tuning := TTuning.load_tuning()
 	if tuning.is_empty():
-		return {"levels": [], "error": "tuning.json missing or invalid"}
+		return {"levels": [], "error": "tuning.json missing or invalid", "warnings": []}
 	var err := validate_file(parsed, tuning)
 	if err != "":
-		return {"levels": [], "error": err}
-	return {"levels": parsed["levels"], "error": ""}
+		return {"levels": [], "error": err, "warnings": []}
+	# Warn-and-load visual rules (7-8): warnings never block loading.
+	var warnings: Array[String] = []
+	for lv in parsed["levels"]:
+		for w in validate_visual_rules(lv, tuning):
+			push_warning(w)
+			warnings.append(w)
+	return {"levels": parsed["levels"], "error": "", "warnings": warnings}
 
 
 static func validate_file(data: Dictionary, tuning: Dictionary) -> String:
@@ -88,6 +103,9 @@ static func validate_level(lv: Dictionary, index: int, tuning: Dictionary) -> St
 		return "hazards must be an array"
 	if (lv["hazards"] as Array).is_empty() and index >= 3:
 		return "hazards may be empty only for the first 3 teaching levels"
+	# `decorations` is optional (missing = []): accepted as-is, never
+	# validated or warned on here (LEVEL_SCHEMA.md rule 10 is
+	# harness-only; the builder draws whatever array is present).
 	var i := 0
 	for p in lv["platforms"]:
 		var e := _validate_platform(p, i, tuning)
@@ -312,6 +330,289 @@ static func _validate_geometry(lv: Dictionary, tuning: Dictionary) -> String:
 	if not _has_stable(door_ground):
 		return "door stands only on timed/falling ground"
 	return ""
+
+
+# Warn-and-load visual rules 7 (grounding) and 8 (HUD keep-out) from
+# LEVEL_SCHEMA.md v2. Returns one string per violation, each naming the
+# level id and the rule. Callers must run validate_level first: this
+# function assumes fields exist and geometry is in bounds. It mirrors
+# the checker's geometric predicates; deliberate simplifications where
+# the schema text leaves a reading open (the verification lane
+# cross-checks zero warnings on the shipped file, so drift surfaces):
+# - Swing arcs are 13 UNIFORM samples from -half-arc to +half-arc
+#   (the motion-time sine sampling in _hazard_near_door covers the
+#   same extremes but clusters samples; uniform sampling matches the
+#   schema's "13-sample swing arc" wording).
+# - Path saws are checked at endpoints only, per the schema wording;
+#   the path interior is not sampled (exact for the y-extent, since
+#   the path is a straight segment).
+# - Resting support must be GROUNDED solids, with the checker's
+#   combined-overlap rule: one support with >= 48px overlap, or both
+#   end regions on supports totalling >= 48px (gap <= 4).
+# - Ends-touching has NO shape test (Lead decision, LEVEL_SCHEMA.md
+#   v2 rule 7): "vertical" means grounded-via-fixpoint. Any grounded
+#   solid counts if the y-overlap is >= 8px.
+# - Pillar-connected follows the checker exactly: the pillar must
+#   itself be grounded (fixpoint), w >= 48, top touching the
+#   platform bottom (gap <= 4), x-span within the platform span.
+# - Shaft columns must span the sweep y-range within a 4px slack.
+# - Resting for dashed/falling/tilting/moving uses the same
+#   combined-overlap rule as solids (checker _resting_on).
+# - Hazard supports (spike seats, saw touch, column bottom) may be
+#   ANY solid rect, with >= 8px overlap (checker seating rule); a
+#   floating support is flagged once by the platform rule instead of
+#   once per hazard. Grounded is required only where the schema says
+#   so: down-spike beams, column beams, swing pivots, and shaft
+#   columns.
+# - Moving platforms: shaft-flanking uses the full sweep rect;
+#   resting uses the home rect.
+static func validate_visual_rules(lv: Dictionary, tuning: Dictionary) -> Array[String]:
+	var out: Array[String] = []
+	var id := str(lv.get("id", "?"))
+	var bar_y := float(tuning.get("control_bar", {}).get("y", 580))
+	var plats: Array = lv.get("platforms", [])
+	var hazards: Array = lv.get("hazards", [])
+	var grounded := _vis_grounded_flags(plats, bar_y)
+	for i in range(plats.size()):
+		var p: Dictionary = plats[i]
+		var kind := str(p.get("kind", ""))
+		if kind == "solid":
+			if not grounded[i]:
+				out.append("level %s rule 7: platforms[%d] solid is not grounded (floating)" % [id, i])
+		elif not _vis_platform_supported(i, plats, grounded):
+			out.append("level %s rule 7: platforms[%d] %s is neither shaft-flanked nor resting" % [id, i, kind])
+	for i in range(hazards.size()):
+		_vis_check_hazard_grounding(hazards[i], i, plats, grounded, bar_y, id, out)
+	# Rule 8: no drawn extent in y < 90; spawn feet >= 134; door >= 174.
+	var spawn: Dictionary = lv.get("spawn", {})
+	if float(spawn.get("y", 0)) < SPAWN_MIN_Y:
+		out.append("level %s rule 8: spawn feet y < 134 (hero head enters HUD band)" % id)
+	var door: Dictionary = lv.get("door", {})
+	if float(door.get("y", 0)) < DOOR_MIN_Y:
+		out.append("level %s rule 8: door base y < 174 (door top enters HUD band)" % id)
+	for i in range(plats.size()):
+		var sweep := _vis_sweep_rect(plats[i])
+		if sweep.position.y < HUD_KEEPOUT_Y:
+			out.append("level %s rule 8: platforms[%d] drawn extent enters HUD band (y < 90)" % [id, i])
+	for i in range(hazards.size()):
+		var h: Dictionary = hazards[i]
+		if str(h.get("type", "")) == "saw":
+			var r := float(h.get("r", 0))
+			for c in _vis_saw_centres(h):
+				if c.y - r < HUD_KEEPOUT_Y:
+					out.append("level %s rule 8: hazards[%d] saw disc enters HUD band (y < 90)" % [id, i])
+					break
+		elif float(h.get("y", 0)) < HUD_KEEPOUT_Y:
+			out.append("level %s rule 8: hazards[%d] drawn extent enters HUD band (y < 90)" % [id, i])
+	return out
+
+
+static func _vis_rect(p: Dictionary) -> Rect2:
+	return Rect2(float(p.get("x", 0)), float(p.get("y", 0)), float(p.get("w", 0)), float(p.get("h", 0)))
+
+
+static func _vis_sweep_rect(p: Dictionary) -> Rect2:
+	var r := _vis_rect(p)
+	if str(p.get("kind", "")) == "moving":
+		var end := Rect2(r.position + Vector2(float(p.get("dx", 0)), float(p.get("dy", 0))), r.size)
+		return r.merge(end)
+	return r
+
+
+static func _vis_x_overlap(a: Rect2, b: Rect2) -> float:
+	return minf(a.end.x, b.end.x) - maxf(a.position.x, b.position.x)
+
+
+static func _vis_y_overlap(a: Rect2, b: Rect2) -> float:
+	return minf(a.end.y, b.end.y) - maxf(a.position.y, b.position.y)
+
+
+static func _vis_saw_centres(h: Dictionary) -> Array[Vector2]:
+	var rest := Vector2(float(h.get("x", 0)), float(h.get("y", 0)))
+	if h.has("swing"):
+		var sw: Dictionary = h["swing"]
+		var pivot := Vector2(float(sw.get("pivot_x", 0)), float(sw.get("pivot_y", 0)))
+		var half := deg_to_rad(float(sw.get("arc_deg", 0))) * 0.5
+		var centres: Array[Vector2] = []
+		for k in range(SWING_SAMPLES):
+			var frac := -1.0 + 2.0 * float(k) / float(SWING_SAMPLES - 1)
+			centres.append(pivot + (rest - pivot).rotated(half * frac))
+		return centres
+	var centres2: Array[Vector2] = [rest]
+	if h.has("path"):
+		var path: Dictionary = h["path"]
+		centres2.append(Vector2(float(path.get("x2", 0)), float(path.get("y2", 0))))
+	return centres2
+
+
+# Fixpoint: a solid is grounded if it stands on the floor, rests on a
+# grounded solid, is pillar-connected to a grounded solid,
+# or has both ends touching grounded solids.
+static func _vis_grounded_flags(plats: Array, bar_y: float) -> Array:
+	var grounded: Array = []
+	for i in range(plats.size()):
+		grounded.append(false)
+	var changed := true
+	var guard := 0
+	while changed and guard <= plats.size() + 1:
+		changed = false
+		guard += 1
+		for i in range(plats.size()):
+			if str(plats[i].get("kind", "")) != "solid" or grounded[i]:
+				continue
+			if _vis_solid_grounded(i, plats, grounded, bar_y):
+				grounded[i] = true
+				changed = true
+	return grounded
+
+
+# Checker _resting_on exactly: one grounded support with x-overlap
+# >= 48, or both end regions (third = max(8, w/3)) on grounded
+# supports with >= 8px each and combined overlap >= 48. Gap <= 4.
+static func _vis_resting_on(r: Rect2, plats: Array, grounded: Array) -> bool:
+	var bottom := r.end.y
+	var total := 0.0
+	var left_ok := false
+	var right_ok := false
+	var third := maxf(8.0, r.size.x / 3.0)
+	var left_region := Rect2(r.position, Vector2(third, r.size.y))
+	var right_region := Rect2(Vector2(r.end.x - third, r.position.y), Vector2(third, r.size.y))
+	for j in range(plats.size()):
+		if not grounded[j]:
+			continue
+		var s := _vis_rect(plats[j])
+		if absf(bottom - s.position.y) > GROUND_TOL:
+			continue
+		var ov := _vis_x_overlap(r, s)
+		if ov >= REST_OVERLAP:
+			return true
+		total += maxf(0.0, ov)
+		if _vis_x_overlap(left_region, s) >= 8.0:
+			left_ok = true
+		if _vis_x_overlap(right_region, s) >= 8.0:
+			right_ok = true
+	return left_ok and right_ok and total >= REST_OVERLAP
+
+
+static func _vis_solid_grounded(i: int, plats: Array, grounded: Array, bar_y: float) -> bool:
+	var r := _vis_rect(plats[i])
+	if absf(r.end.y - bar_y) <= GROUND_TOL:
+		return true
+	if _vis_resting_on(r, plats, grounded):
+		return true
+	for j in range(plats.size()):
+		if j == i or not grounded[j]:
+			continue
+		var q2 := _vis_rect(plats[j])
+		if q2.size.x < REST_OVERLAP:
+			continue
+		if absf(q2.position.y - r.end.y) > GROUND_TOL:
+			continue
+		if q2.position.x < r.position.x or q2.end.x > r.end.x:
+			continue
+		return true
+	var left := false
+	var right := false
+	for j in range(plats.size()):
+		if j == i or not grounded[j]:
+			continue
+		var q3 := _vis_rect(plats[j])
+		if _vis_y_overlap(r, q3) < 8.0:
+			continue
+		if absf(q3.end.x - r.position.x) <= GROUND_TOL:
+			left = true
+		if absf(q3.position.x - r.end.x) <= GROUND_TOL:
+			right = true
+	return left and right
+
+
+static func _vis_platform_supported(i: int, plats: Array, grounded: Array) -> bool:
+	var home := _vis_rect(plats[i])
+	var sweep := _vis_sweep_rect(plats[i])
+	if _vis_resting_on(home, plats, grounded):
+		return true
+	var left := false
+	var right := false
+	for j in range(plats.size()):
+		if j == i or str(plats[j].get("kind", "")) != "solid" or not grounded[j]:
+			continue
+		var q := _vis_rect(plats[j])
+		if q.position.y > sweep.position.y + GROUND_TOL or q.end.y < sweep.end.y - GROUND_TOL:
+			continue
+		var lgap := sweep.position.x - q.end.x
+		var rgap := q.position.x - sweep.end.x
+		if lgap >= -GROUND_TOL and lgap <= SHAFT_TOL:
+			left = true
+		if rgap >= -GROUND_TOL and rgap <= SHAFT_TOL:
+			right = true
+	return left and right
+
+
+static func _vis_check_hazard_grounding(h: Dictionary, i: int, plats: Array, grounded: Array, bar_y: float, id: String, out: Array[String]) -> void:
+	var htype := str(h.get("type", ""))
+	if htype == "hanging_pillar" or htype == "dotted_line":
+		return
+	var r := _vis_rect(h)
+	if htype == "spikes":
+		var dir := str(h.get("dir", "up"))
+		var seated := false
+		for j in range(plats.size()):
+			if str(plats[j].get("kind", "")) != "solid":
+				continue
+			var q := _vis_rect(plats[j])
+			if dir == "up":
+				if absf(q.position.y - r.end.y) <= GROUND_TOL and _vis_x_overlap(r, q) >= 8.0:
+					seated = true
+			elif dir == "down":
+				if grounded[j] and absf(q.end.y - r.position.y) <= GROUND_TOL and _vis_x_overlap(r, q) >= 8.0:
+					seated = true
+			elif dir == "left":
+				if absf(q.position.x - r.end.x) <= GROUND_TOL and _vis_y_overlap(r, q) >= 8.0:
+					seated = true
+			elif dir == "right":
+				if absf(q.end.x - r.position.x) <= GROUND_TOL and _vis_y_overlap(r, q) >= 8.0:
+					seated = true
+		if not seated:
+			out.append("level %s rule 7: hazards[%d] spikes (%s) are not seated on a solid surface" % [id, i, dir])
+	elif htype == "saw":
+		var rad := float(h.get("r", 0))
+		var centres := _vis_saw_centres(h)
+		for k in range(centres.size()):
+			var touches := false
+			for j in range(plats.size()):
+				if str(plats[j].get("kind", "")) != "solid":
+					continue
+				if _point_rect_dist(centres[k].x, centres[k].y, _vis_rect(plats[j])) <= rad + GROUND_TOL:
+					touches = true
+					break
+			if not touches:
+				out.append("level %s rule 7: hazards[%d] saw disc does not touch solid geometry at sweep sample %d" % [id, i, k])
+				break
+		if h.has("swing"):
+			var sw: Dictionary = h["swing"]
+			var pivot := Vector2(float(sw.get("pivot_x", 0)), float(sw.get("pivot_y", 0)))
+			var inside := false
+			for j in range(plats.size()):
+				if str(plats[j].get("kind", "")) != "solid" or not grounded[j]:
+					continue
+				var q2 := _vis_rect(plats[j])
+				if pivot.x >= q2.position.x and pivot.x <= q2.end.x and pivot.y >= q2.position.y and pivot.y <= q2.end.y:
+					inside = true
+					break
+			if not inside:
+				out.append("level %s rule 7: hazards[%d] swing pivot is not inside a solid beam" % [id, i])
+	elif htype == "spiked_column":
+		var ok := absf(r.end.y - bar_y) <= GROUND_TOL
+		for j in range(plats.size()):
+			if str(plats[j].get("kind", "")) != "solid":
+				continue
+			var q3 := _vis_rect(plats[j])
+			if absf(q3.position.y - r.end.y) <= GROUND_TOL and _vis_x_overlap(r, q3) >= 8.0:
+				ok = true
+			if grounded[j] and absf(q3.end.y - r.position.y) <= GROUND_TOL and _vis_x_overlap(r, q3) >= 8.0:
+				ok = true
+		if not ok:
+			out.append("level %s rule 7: hazards[%d] spiked_column is neither grounded nor hung from a beam" % [id, i])
 
 
 static func _hazard_near_point(lv: Dictionary, px: float, py: float) -> String:

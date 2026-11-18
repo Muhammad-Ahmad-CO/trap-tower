@@ -80,12 +80,15 @@ sys.path.insert(0, str(HERE))
 import check_levels  # noqa: E402  (exact verifier: schema + distinctness)
 
 SEED_DEFAULT = 20261118
-SCHEMA_VERSION = 1  # LEVEL_SCHEMA.md (frozen contract version)
+SCHEMA_VERSION = 2  # LEVEL_SCHEMA.md v2 (frozen contract version)
 FLOOR_TOP = 500     # level-design choice (schema example uses 500); the
                     # control bar starts at tuning.json control_bar.y.
 VARIANT_STRIDE = 3  # fixed stride so pilot (variant 1) stages are the
                     # same grid points as bulk variant-1 stages.
 MAX_ATTEMPTS = 6    # grid-point retries per candidate before rejection.
+DECO_PASS_ENABLED = True  # Test hook ONLY: the deco-diff proof flips
+# this off to show disabled-vs-enabled generations differ ONLY in the
+# `decorations` array. Production generation always leaves it on.
 
 
 # ---------------------------------------------------------------------------
@@ -281,10 +284,12 @@ def normalize_ground(c, platforms):
 
 def route_is_low(c, platforms, spawn, door):
     """True if every route surface is at/below y=380 (tops >= 380):
-    skyline dressing + ceiling strips are then provably clear of every
-    jump arc (head at apex >= 380-153-44 = 183 > strip/ledge bottoms),
-    every checker arc band, and every walking band. High routes
-    (towers/terraces) carry their own upper structure instead."""
+    gantry dressing beams (bottoms <= 246) and ceiling strips are
+    then clear of every checker arc band (bands start at
+    top_min - apex >= 380 - 153 = 227 for the lowest allowed
+    takeoff, and every real low-route takeoff is >= 420, so bands
+    start >= 267). High routes (towers/terraces) carry their own
+    upper structure instead."""
     if spawn[1] < 380 or door[1] < 380:
         return False
     for p in platforms:
@@ -338,58 +343,90 @@ def dressing_exclusions(hazards):
     return excl
 
 
-def add_skyline_dressing(c, kk, salt, platforms, hazards):
-    """High isolated ledges (tops 60..140, bottoms <= 160) with spike
-    or saw toppings, for LOW routes only. Ledges are unreachable
-    decoration: >100px above every route surface and clear of every
-    arc band, walking band, probe rect, and safe zone (see
-    route_is_low). Toppings are ground-sitting spikes / static saws,
-    so they cannot break the checker. Returns the number of ledges."""
-    excl = dressing_exclusions(hazards)
-    tops = [60, 100, 140, 80, 120]
-    widths = [140, 180, 120, 200, 160]
-    toppings = ["spikes", "saw", "none", "spikes", "saw"]
-    n = g(kk, [2, 3, 3, 2], salt=salt)
-    placed = []
-    tried = 0
+def add_skyline_dressing(c, kk, salt, platforms, hazards, spawn,
+                         door_pos):
+    """Gantry skyline dressing for LOW routes only: 1-2 full-width
+    beams (tops 150..230, bottoms <= 246) on shared edge walls, with
+    spike/saw toppings seated on the beam tops. Beams stay clear of
+    every jump arc band on low routes (route tops >= 420, so arc
+    bands start at y >= 267) and the walls stand beyond the
+    spawn/door x-ranges, so dressing can never block the route --
+    unlike pillar-grounded ledges, whose floor pillars would wall
+    off the flat walking route. Skipped entirely when an edge wall
+    would block the door rect (the retry loop tries another grid
+    point). Returns the number of beams."""
+    for wx in (0, c.width - 48):
+        wall_rect = (float(wx), 150.0, 48.0, float(c.bar_y) - 150.0)
+        if _blocks_spawn_door(c, wall_rect, spawn, door_pos):
+            return 0
+        if _rect_hazard_overlap(wall_rect, hazards):
+            return 0
+    tops = [150, 160, 170, 180, 190, 200, 210, 220, 230, 240]
+    n = g(kk, [1, 2, 2, 3], salt=salt)
+    chosen = []
     for i in range(n):
-        w = g(kk, widths, salt=salt + i * 3)
         top = g(kk, tops, salt=salt + i * 5)
-        # Spread slot starts across the screen by (kk, i).
-        starts = [x0 for x0 in range(140, 1181 - w, 40)]
-        if not starts:
+        # Beams >= 48px apart: a topping spike strip (24px tall) on
+        # one beam must never area-overlap the beam above it (rule 7),
+        # and a down-spike strip (28px) under one beam must clear the
+        # beam below. The old 20px spacing guaranteed such overlaps.
+        if any(abs(top - t) < 48 for t in chosen):
             continue
-        order = [(tried * 5 + kk * 3 + i * 7) % len(starts)]
-        order += [(order[0] + j * 3) % len(starts)
-                  for j in range(1, len(starts))]
+        chosen.append(top)
+    if not chosen:
+        return 0
+    wall_top = min(chosen)
+    for wx in (0, c.width - 48):
+        platforms.append(plat(wx, wall_top, 48, c.bar_y - wall_top,
+                              "solid"))
+    excl = dressing_exclusions(hazards)
+    toppings = ["spikes", "saw", "none", "spikes", "saw"]
+    placed = 0
+    for j, top in enumerate(chosen):
+        beam_rect = (48.0, float(top), c.width - 96.0, 16.0)
+        # A full-width beam crossing a hanging column reads as the
+        # column piercing the beam and fails the rule-7 overlap rule
+        # (D40 stalactites): skip beams the hazards already occupy.
+        if _rect_hazard_overlap(beam_rect, hazards):
+            continue
+        platforms.append(plat(48, top, c.width - 96, 16, "solid"))
+        placed += 1
+        topping = g(kk, toppings, salt=salt + j * 7 + 1)
+        if topping == "none":
+            continue
+        starts = [x0 for x0 in range(140, 1081, 40)]
+        order = [(kk * 3 + j * 7) % len(starts)]
+        order += [(order[0] + m * 3) % len(starts)
+                  for m in range(1, len(starts))]
         for oi in order:
-            tried += 1
             x0 = starts[oi]
+            w = 80 if topping == "spikes" else 60
             if any(_overlaps(x0, x0 + w, e0, e1) for (e0, e1) in excl):
                 continue
-            if any(_overlaps(x0 - 40, x0 + w + 40, p0, p1)
-                   for (p0, p1) in placed):
-                continue
-            platforms.append(plat(x0, top, w, 20, "solid"))
-            placed.append((x0, x0 + w))
-            topping = g(kk, toppings, salt=salt + i * 7 + 1)
             if topping == "spikes":
-                sw = g(kk, [48, 64, 80], salt=salt + i)
-                sx = x0 + (w - sw) // 2
-                hazards.append(spikes_up(sx, sw, top=top))
-            elif topping == "saw":
-                r = g(kk, [26, 28], salt=salt + i)
-                hazards.append(saw_static(x0 + w // 2, top - r + 4, r))
+                sw = g(kk, [48, 64, 80], salt=salt + j)
+                top_rect = (float(x0), float(top - 24), float(sw), 24.0)
+                if any(p["kind"] == "solid"
+                       and _xov(top_rect, _pr(p)) > _GTOL
+                       and _yov(top_rect, _pr(p)) > _GTOL
+                       for p in platforms):
+                    continue
+                hazards.append(spikes_up(x0, sw, top=top))
+            else:
+                r = g(kk, [26, 28], salt=salt + j)
+                hazards.append(saw_static(x0 + 30, top - r + 4, r))
             break
-    return len(placed)
+    return placed
 
 
 def add_ceiling_strip(c, kk, salt, platforms, hazards):
     """One static dir-down ceiling spike strip for LOW routes that
-    still lack an upper-band element. Tier-a (bottom 260..280) with
-    220px buffers around raised takeoffs/gaps; tier-b (bottom
-    168..192) only where it clears the highest takeoff's jump head
-    (bottom <= min_takeoff_top - 200). Returns True if placed."""
+    still lack an upper-band element. The strip hangs from a gantry
+    beam added by the grounding repair (rule 7: ceiling spikes only
+    under grounded beams). Tier-a (bottom 260..280) with 220px
+    buffers around raised takeoffs/gaps; tier-b (bottom 168..192)
+    only where it clears the highest takeoff's jump head (bottom
+    <= min_takeoff_top - 200). Returns True if placed."""
     # Highest (smallest-y) route takeoff top.
     min_top = FLOOR_TOP
     for p in platforms:
@@ -439,7 +476,13 @@ def add_ceiling_strip(c, kk, salt, platforms, hazards):
         hard = hard_exclusions(buf)
         fitting = [x0 for x0 in range(200, 1081 - w, 40)
                    if not any(_overlaps(x0, x0 + w, e0, e1)
-                              for (e0, e1) in hard)]
+                              for (e0, e1) in hard)
+                   and not any(p["kind"] == "solid"
+                               and _xov((float(x0), float(y), float(w),
+                                         28.0), _pr(p)) > _GTOL
+                               and _yov((float(x0), float(y), float(w),
+                                         28.0), _pr(p)) > _GTOL
+                               for p in platforms)]
         if not fitting:
             continue
         preferred = [x0 for x0 in fitting
@@ -463,6 +506,1298 @@ def _platform_positions(p):
 
 def has_lethal_hazard(hazards):
     return any(h["type"] != "dotted_line" for h in hazards)
+
+
+# ---------------------------------------------------------------------------
+# Grounding repair (LEVEL_SCHEMA.md v2 rules 7-8). Builders emit the
+# archetype layout; this pass ADDS support geometry only (pillars,
+# shaft walls, gantry beams, rails, posts, strips) -- it never moves
+# or removes builder geometry, so archetype identity and solutions
+# survive. Every addition is verified by the real checker in main().
+# Tolerances mirror tools/check_levels.py exactly. Keep-out and
+# density failures cannot be repaired by adding geometry: builders
+# own those (dressing/tower/skyline geometry), and unrepairable
+# draws are rejected by the checker + retry loop, never shipped.
+# ---------------------------------------------------------------------------
+
+_GTOL = 4.0       # grounding tolerance, LEVEL_SCHEMA.md rule 7
+_KEEPOUT_Y = 90   # HUD band, LEVEL_SCHEMA.md rule 8
+
+
+def _pr(p):
+    return (float(p["x"]), float(p["y"]), float(p["w"]), float(p["h"]))
+
+
+def _xov(a, b):
+    return min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0])
+
+
+def _yov(a, b):
+    return min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1])
+
+
+def _blocks_spawn_door(c, rect, spawn, door_pos):
+    """True if rect would trip the checker's spawn-inside or
+    door-rect-blocked errors (strict inequalities, as in the checker)."""
+    sx, sy = float(spawn[0]), float(spawn[1])
+    if rect[0] < sx < rect[0] + rect[2] \
+            and rect[1] < sy < rect[1] + rect[3]:
+        return True
+    drect = (float(door_pos[0]) - c.door_w / 2.0,
+             float(door_pos[1]) - c.door_h, c.door_w, c.door_h)
+    return (rect[0] < drect[0] + drect[2]
+            and drect[0] < rect[0] + rect[2]
+            and rect[1] < drect[1] + drect[3]
+            and drect[1] < rect[1] + rect[3])
+
+
+def _has_rect(plats, rect):
+    for p in plats:
+        if p["kind"] == "solid" and _pr(p) == rect:
+            return True
+    return False
+
+
+def _rect_hazard_overlap(rect, hazards):
+    """True if rect area-overlaps any spikes/spiked_column hazard
+    rect beyond the 4px seating tolerance (LEVEL_SCHEMA.md rule 7).
+    Saws, hanging_pillar and dotted_line are exempt, as in the
+    checker. Used by every repair/dressing pass that ADDS a solid:
+    added geometry must never hide a support behind a hazard."""
+    for h in hazards:
+        if h.get("type") not in ("spikes", "spiked_column"):
+            continue
+        hr = (float(h["x"]), float(h["y"]), float(h["w"]),
+              float(h["h"]))
+        if _xov(rect, hr) > _GTOL and _yov(rect, hr) > _GTOL:
+            return True
+    return False
+
+
+def _core_middle_stats(platforms, width):
+    """(count, combined width) for the LEVEL_SCHEMA.md rule 9
+    core-middle floor: non-edge solid rects intersecting y 260..420.
+    Mirrors check_levels.check_density_floor exactly."""
+    count = 0
+    total = 0.0
+    for p in platforms:
+        if p["kind"] != "solid":
+            continue
+        if p["x"] == 0 or p["x"] + p["w"] == width:
+            continue
+        if p["y"] < 420 and p["y"] + p["h"] > 260:
+            count += 1
+            total += p["w"]
+    return count, total
+
+
+def _resting_on_gen(r, rects, grounded):
+    """Mirror of the checker's resting test (single >= 48px support,
+    or both end regions on supports with combined overlap >= 48)."""
+    bottom = r[1] + r[3]
+    total = 0.0
+    left_ok = right_ok = False
+    third = max(8.0, r[2] / 3.0)
+    for j in grounded:
+        s = rects[j]
+        if abs(bottom - s[1]) > _GTOL:
+            continue
+        ov = _xov(r, s)
+        if ov >= 48.0:
+            return True
+        total += max(0.0, ov)
+        if _xov((r[0], r[1], third, r[3]), s) >= 8.0:
+            left_ok = True
+        if _xov((r[0] + r[2] - third, r[1], third, r[3]), s) >= 8.0:
+            right_ok = True
+    return left_ok and right_ok and total >= 48.0
+
+
+def _grounded_solids_gen(plats, bar_y):
+    """Fixpoint set of grounded solid indices (mirror of the checker:
+    floor, resting, pillar-connected, both-ends-touching)."""
+    rects = [_pr(p) for p in plats]
+    grounded = set()
+    changed = True
+    while changed:
+        changed = False
+        for i, r in enumerate(rects):
+            if i in grounded or plats[i]["kind"] != "solid":
+                continue
+            bottom = r[1] + r[3]
+            ok = abs(bottom - bar_y) <= _GTOL
+            if not ok:
+                ok = _resting_on_gen(r, rects, grounded)
+            if not ok:
+                for j in grounded:
+                    q = rects[j]
+                    if q[2] < 48.0:
+                        continue
+                    if abs(q[1] - bottom) <= _GTOL \
+                            and q[0] >= r[0] \
+                            and q[0] + q[2] <= r[0] + r[2]:
+                        ok = True
+                        break
+            if not ok:
+                left = right = False
+                for j in grounded:
+                    s = rects[j]
+                    if _yov(r, s) >= 8.0:
+                        if abs((s[0] + s[2]) - r[0]) <= _GTOL:
+                            left = True
+                        if abs(s[0] - (r[0] + r[2])) <= _GTOL:
+                            right = True
+                ok = left and right
+            if ok:
+                grounded.add(i)
+                changed = True
+    return grounded, rects
+
+
+def _swept_extent(p):
+    """(x0, x1, y0, y1) swept extent; rest rect unless moving."""
+    r = _pr(p)
+    x0, x1, y0, y1 = r[0], r[0] + r[2], r[1], r[1] + r[3]
+    if p["kind"] == "moving":
+        dx = float(p.get("dx", 0))
+        dy = float(p.get("dy", 0))
+        x0, x1 = min(x0, x0 + dx), max(x1, x1 + dx)
+        y0, y1 = min(y0, y0 + dy), max(y1, y1 + dy)
+    return (x0, x1, y0, y1)
+
+
+def _flank_sides_gen(idx, plats, rects, grounded):
+    """(left_flanked, right_flanked) for a special platform, measured
+    from the swept extent (mirror of the checker)."""
+    p = plats[idx]
+    x0, x1, y0, y1 = _swept_extent(p)
+    left = right = False
+    for j in grounded:
+        s = rects[j]
+        if s[1] > y0 + _GTOL or s[1] + s[3] < y1 - _GTOL:
+            continue
+        if -_GTOL <= x0 - (s[0] + s[2]) <= 8.0:
+            left = True
+        if -_GTOL <= s[0] - x1 <= 8.0:
+            right = True
+    return left, right
+
+
+def _special_supported_gen(idx, plats, rects, grounded):
+    if _resting_on_gen(rects[idx], rects, grounded):
+        return True
+    left, right = _flank_sides_gen(idx, plats, rects, grounded)
+    return left and right
+
+
+def _support_top_below(rects, grounded, x0, x1, min_top):
+    """Highest grounded-solid top >= min_top spanning [x0, x1] fully,
+    or None. A support must cover the full support width (resting
+    needs 48px overlap)."""
+    best = None
+    for j in grounded:
+        s = rects[j]
+        if s[1] < min_top:
+            continue
+        if s[0] <= x0 and s[0] + s[2] >= x1:
+            if best is None or s[1] < best:
+                best = s[1]
+    return best
+
+
+def _ground_solids(c, plats, hazards, spawn, door_pos):
+    """Add under-pillars (or extend down) until every solid is
+    grounded, iterating so lower supports ground before upper
+    dependents lean on them. Pillars sit at platform ends, inside
+    the platform's x-span, on the highest spanning support below
+    (or the floor line)."""
+    bar_y = float(c.bar_y)
+    for _round in range(12):
+        grounded, rects = _grounded_solids_gen(plats, bar_y)
+        todo = [i for i, p in enumerate(plats)
+                if p["kind"] == "solid" and i not in grounded]
+        if not todo:
+            return
+        todo.sort(key=lambda i: -(rects[i][1] + rects[i][3]))
+        progress = False
+        for i in todo:
+            # Refresh the fixpoint before EACH platform: a pillar
+            # added for a lower platform earlier in this round may
+            # already ground this one (e.g. D31 shaft walls resting
+            # on the lower floors). Pillaring from a stale set adds
+            # redundant full-height columns that seal the route.
+            grounded, rects = _grounded_solids_gen(plats, bar_y)
+            if i in grounded:
+                continue
+            r = rects[i]
+            bottom = r[1] + r[3]
+            if bottom < _KEEPOUT_Y or bottom > bar_y:
+                continue
+            cands = [r[0], r[0] + r[2] - 48.0]
+            k = 1
+            while r[0] + k * 24.0 < r[0] + r[2] - 48.0:
+                cands.append(r[0] + k * 24.0)
+                k += 1
+            # Edge-first: support stacked floors from the screen-edge
+            # columns. A tall pillar under a mid-route platform end
+            # can seal a shaft/corridor at floor level (D31); an edge
+            # pillar leaves the route open.
+            cands.sort(key=lambda px: (min(px, c.width - (px + 48.0)),
+                                       px))
+            for px in cands:
+                if px < 0 or px + 48.0 > c.width:
+                    continue
+                top = _support_top_below(rects, grounded, px, px + 48.0,
+                                         bottom)
+                if top is None:
+                    top = bar_y
+                gap = top - bottom
+                if gap <= _GTOL:
+                    continue
+                if gap < 16.0:
+                    ext = (r[0], bottom, r[2], gap)
+                    if _rect_hazard_overlap(ext, hazards):
+                        continue
+                    plats[i]["h"] = int(round(top - r[1]))
+                    progress = True
+                    break
+                rect = (px, bottom, 48.0, gap)
+                if _blocks_spawn_door(c, rect, spawn, door_pos):
+                    continue
+                if _rect_hazard_overlap(rect, hazards):
+                    continue
+                if _has_rect(plats, rect):
+                    continue
+                plats.append(plat(px, bottom, 48, gap, "solid"))
+                progress = True
+                break
+        if not progress:
+            return
+
+
+def _flank_specials(c, plats, hazards, spawn, door_pos):
+    """Add missing shaft walls for dashed/falling/tilting/moving
+    platforms. Walls stand beside the swept extent (never under),
+    span the full sweep y-range, and rest on a support top or the
+    floor line. Existing flank columns are credited, never doubled."""
+    bar_y = float(c.bar_y)
+    specials = [i for i, p in enumerate(plats)
+                if p["kind"] in ("dashed", "falling", "tilting",
+                                 "moving")]
+    for idx in specials:
+        grounded, rects = _grounded_solids_gen(plats, bar_y)
+        if _special_supported_gen(idx, plats, rects, grounded):
+            continue
+        left, right = _flank_sides_gen(idx, plats, rects, grounded)
+        x0, x1, y0, y1 = _swept_extent(plats[idx])
+        if y0 < _KEEPOUT_Y:
+            continue
+        for side in ("left", "right"):
+            if side == "left" and left:
+                continue
+            if side == "right" and right:
+                continue
+            if side == "left":
+                wx = x0 - 56.0
+                if wx < 0:
+                    wx = x0 - 48.0
+                if wx < 0:
+                    continue
+            else:
+                wx = x1 + 8.0
+                if wx + 48.0 > c.width:
+                    wx = x1
+                if wx + 48.0 > c.width:
+                    continue
+            top = _support_top_below(rects, grounded, wx, wx + 48.0, y1)
+            bottom = bar_y if top is None else top
+            if bottom - y0 < 16.0:
+                bottom = bar_y
+            rect = (wx, y0, 48.0, bottom - y0)
+            if _blocks_spawn_door(c, rect, spawn, door_pos):
+                continue
+            if _rect_hazard_overlap(rect, hazards):
+                continue
+            if _has_rect(plats, rect):
+                continue
+            plats.append(plat(wx, y0, 48, bottom - y0, "solid"))
+
+
+def _beam_needs(plats, hazards, grounded, rects, bar_y):
+    """(bottom_y, top_y, x0, x1) gantry beams needed by unseated
+    down-spikes, swing pivots outside grounded beams, and hanging
+    columns. (x0, x1) is the union of the needing hazards' x-spans:
+    the LOCAL span a beam must cover. Deduped by bottom_y within
+    tolerance (spans merged)."""
+    needs = []
+    solids = [(j, rects[j]) for j in range(len(rects))
+              if plats[j]["kind"] == "solid"]
+    for h in hazards:
+        t = h.get("type")
+        if t == "spikes" and h.get("dir", "up") == "down":
+            top = float(h["y"])
+            hr = (float(h["x"]), top, float(h["w"]), float(h["h"]))
+            seated = any(j in grounded
+                         and abs(top - (s[1] + s[3])) <= _GTOL
+                         and _xov(hr, s) >= 8.0
+                         for j, s in solids)
+            if not seated:
+                needs.append((top, top - 16.0, hr[0], hr[0] + hr[2]))
+        elif t == "saw" and "swing" in h:
+            s = h["swing"]
+            px, py = float(s["pivot_x"]), float(s["pivot_y"])
+            inside = any(j in grounded and s2[0] <= px <= s2[0] + s2[2]
+                         and s2[1] <= py <= s2[1] + s2[3]
+                         for j, s2 in solids)
+            if not inside:
+                needs.append((py + 10.0, py - 10.0, px - 24.0, px + 24.0))
+        elif t == "spiked_column":
+            r = (float(h["x"]), float(h["y"]), float(h["w"]),
+                 float(h["h"]))
+            bottom, top = r[1] + r[3], r[1]
+            on_top = abs(bottom - bar_y) <= _GTOL or any(
+                abs(bottom - s[1]) <= _GTOL and _xov(r, s) >= 8.0
+                for _j, s in solids)
+            hung = any(j in grounded
+                       and abs(top - (s[1] + s[3])) <= _GTOL
+                       and _xov(r, s) >= 8.0
+                       for j, s in solids)
+            if not on_top and not hung and top >= 106.0:
+                needs.append((top, top - 16.0, r[0], r[0] + r[2]))
+    needs.sort()
+    out = []
+    for b, t, x0, x1 in needs:
+        if out and abs(b - out[-1][0]) <= _GTOL:
+            _pb, pt, px0, px1 = out[-1]
+            out[-1] = (_pb, pt, min(px0, x0), max(px1, x1))
+            continue
+        out.append((b, t, x0, x1))
+    return out
+
+
+def _route_connected(c, plats, spawn, door_pos):
+    """True if the rule-5 connectivity flood-fill connects spawn to
+    door through open space (the checker's exact predicate)."""
+    return check_levels.connectivity_error(
+        plats, spawn, door_pos, float(c.width), float(c.bar_y),
+        float(c.door_w), float(c.door_h)) is None
+
+
+def _add_gantries(c, plats, hazards, spawn, door_pos):
+    """Gantry beams for ceiling spikes, swing pivots, and hanging
+    columns. Beams are LOCAL: only as wide as the hazards they serve.
+    NO full-width slabs by default -- a full-width beam on edge walls
+    seals any route that must cross its y-plane (D39: the beam +
+    walls sealed the upper/lower halves with no passage). A local
+    beam is kept only if it grounds (existing supports, or short
+    end-posts <= 120px to a spanning support top: tall mid-route
+    posts would wall the route) AND the spawn->door connectivity
+    flood-fill still connects. If no local beam grounds, ONE
+    full-width edge-wall gantry is tried and kept ONLY if
+    connectivity still holds (corridor routes staying below the beam,
+    e.g. D40/D08); otherwise the gantry is skipped and the checker +
+    retry loop decides (hanging columns may still re-seat
+    floor-standing via _repair_spikes_columns)."""
+    bar_y = float(c.bar_y)
+    grounded, rects = _grounded_solids_gen(plats, bar_y)
+    needs = [(b, t, x0, x1) for (b, t, x0, x1) in
+             _beam_needs(plats, hazards, grounded, rects, bar_y)
+             if t >= _KEEPOUT_Y]
+    if not needs:
+        return
+    base = len(plats)
+    # --- Attempt 1: local beams. ---
+    for (b, t, x0, x1) in needs:
+        bx0 = max(0.0, x0 - 8.0)
+        bx1 = min(float(c.width), x1 + 8.0)
+        if bx1 - bx0 < 48.0:
+            bx1 = min(float(c.width), bx0 + 48.0)
+            bx0 = max(0.0, bx1 - 48.0)
+        rect = (bx0, t, bx1 - bx0, b - t)
+        if _blocks_spawn_door(c, rect, spawn, door_pos):
+            continue
+        if _rect_hazard_overlap(rect, hazards):
+            continue
+        if not _has_rect(plats, rect):
+            plats.append(plat(bx0, t, bx1 - bx0, b - t, "solid"))
+    # Short posts under local beams that still float. Post x-positions
+    # try the beam ends first, then interior positions every 24px: a
+    # post hidden behind the hanging column it serves reads as a
+    # floating beam (L196: end-post under a column) and fails the
+    # rule-7 overlap rule, so hazard-overlapping positions are
+    # skipped and the post moves to clear x inside the beam span.
+    grounded2, rects2 = _grounded_solids_gen(plats, bar_y)
+    for idx in range(base, len(plats)):
+        if idx in grounded2:
+            continue
+        r = rects2[idx]
+        bottom = r[1] + r[3]
+        post_xs = [r[0], r[0] + r[2] - 48.0]
+        k = 1
+        while r[0] + k * 24.0 < r[0] + r[2] - 48.0:
+            post_xs.append(r[0] + k * 24.0)
+            k += 1
+        for px in post_xs:
+            if px < 0 or px + 48.0 > c.width:
+                continue
+            top = _support_top_below(rects2, grounded2, px, px + 48.0,
+                                     bottom)
+            if top is None or top - bottom > 120.0:
+                continue
+            gap = top - bottom
+            # Posts must satisfy the platform h >= 16 minimum: a
+            # sub-16 gap cannot be bridged by a post (an 8px post is
+            # a hard checker error). Leave the beam ungrounded so the
+            # local attempt rolls back to the full-width fallback.
+            if gap < 16.0:
+                continue
+            rect = (px, bottom, 48.0, gap)
+            if _blocks_spawn_door(c, rect, spawn, door_pos):
+                continue
+            if _rect_hazard_overlap(rect, hazards):
+                continue
+            if _has_rect(plats, rect):
+                continue
+            plats.append(plat(px, bottom, 48, gap, "solid"))
+            break
+    grounded3, _r3 = _grounded_solids_gen(plats, bar_y)
+    local_ok = len(plats) > base \
+        and all(i in grounded3 for i in range(base, len(plats))) \
+        and _route_connected(c, plats, spawn, door_pos)
+    if local_ok:
+        return
+    del plats[base:]
+    # --- Attempt 2: full-width edge-wall gantry, connectivity-gated.
+    # Kept ONLY when the route stays on one side of the beam; a
+    # sealing gantry is rolled back in full.
+    grounded, rects = _grounded_solids_gen(plats, bar_y)
+    wall_top = min(t for _b, t, _x0, _x1 in needs)
+    walls = []
+    for wx in (0.0, c.width - 48.0):
+        top = _support_top_below(rects, grounded, wx, wx + 48.0,
+                                 wall_top + 16.0)
+        bottom = bar_y if top is None else top
+        if bottom - wall_top < 16.0:
+            bottom = bar_y
+        rect = (wx, wall_top, 48.0, bottom - wall_top)
+        if _blocks_spawn_door(c, rect, spawn, door_pos):
+            return
+        if _rect_hazard_overlap(rect, hazards):
+            return
+        walls.append(rect)
+    for rect in walls:
+        if not _has_rect(plats, rect):
+            plats.append(plat(rect[0], rect[1], 48, rect[3], "solid"))
+    for (b, t, _x0, _x1) in needs:
+        rect = (48.0, t, c.width - 96.0, b - t)
+        if _blocks_spawn_door(c, rect, spawn, door_pos):
+            continue
+        if _rect_hazard_overlap(rect, hazards):
+            continue
+        if not _has_rect(plats, rect):
+            plats.append(plat(48, t, c.width - 96, b - t, "solid"))
+    if not _route_connected(c, plats, spawn, door_pos):
+        del plats[base:]
+
+
+def _saw_touch_ok(h, solid_rects):
+    r = float(h["r"])
+    for (cx, cy) in check_levels.saw_sweep_centres(h):
+        if not any(check_levels.point_rect_dist(cx, cy, s) <= r + _GTOL
+                   for s in solid_rects):
+            return False
+    return True
+
+
+def _repair_saws(c, plats, hazards, spawn, door_pos):
+    """Posts under static saws, rails under near-horizontal patrol
+    saws. Steep/diagonal patrols and swing arcs cannot be repaired
+    by added geometry (any touch-solid would block the route); their
+    builders own the geometry."""
+    bar_y = float(c.bar_y)
+    for h in hazards:
+        if h.get("type") != "saw" \
+                or not isinstance(h.get("r"), (int, float)):
+            continue
+        grounded, rects = _grounded_solids_gen(plats, bar_y)
+        solid_rects = [rects[j] for j in range(len(rects))
+                       if plats[j]["kind"] == "solid"]
+        if _saw_touch_ok(h, solid_rects):
+            continue
+        cx, cy, r = float(h["x"]), float(h["y"]), float(h["r"])
+        if "path" in h and isinstance(h["path"], dict):
+            x2 = float(h["path"]["x2"])
+            y2 = float(h["path"]["y2"])
+            if abs(y2 - cy) > 8.0:
+                continue
+            min_cx, max_cx = min(cx, x2), max(cx, x2)
+            max_cy = max(cy, y2)
+            top = min(max_cy + r - 4.0, bar_y - 16.0)
+            rx0 = max(0.0, min_cx - r)
+            rx1 = min(float(c.width), max_cx + r)
+            if rx1 - rx0 < 48.0:
+                rx1 = min(float(c.width), rx0 + 48.0)
+                rx0 = max(0.0, rx1 - 48.0)
+            rect = (rx0, top, rx1 - rx0, bar_y - top)
+            if _blocks_spawn_door(c, rect, spawn, door_pos):
+                continue
+            if _rect_hazard_overlap(rect, hazards):
+                continue
+            if _has_rect(plats, rect):
+                continue
+            plats.append(plat(rx0, top, rx1 - rx0, bar_y - top, "solid"))
+        elif "swing" in h:
+            continue
+        else:
+            top = cy + r - 2.0
+            px = min(max(cx - 24.0, 0.0), c.width - 48.0)
+            support = _support_top_below(rects, grounded, px, px + 48.0,
+                                         top + 16.0)
+            bottom = bar_y if support is None else support
+            if bottom - top < 16.0:
+                bottom = bar_y
+            if bottom - top < 16.0:
+                continue
+            rect = (px, top, 48.0, bottom - top)
+            if _blocks_spawn_door(c, rect, spawn, door_pos):
+                continue
+            if _rect_hazard_overlap(rect, hazards):
+                continue
+            if _has_rect(plats, rect):
+                continue
+            plats.append(plat(px, top, 48, bottom - top, "solid"))
+
+
+def _spikes_seated_gen(h, plats, rects, grounded):
+    """Mirror of the checker's spike-seating test."""
+    r = (float(h["x"]), float(h["y"]), float(h["w"]), float(h["h"]))
+    d = h.get("dir", "up")
+    solids = [(j, rects[j]) for j in range(len(rects))
+              if plats[j]["kind"] == "solid"]
+    if d == "up":
+        bottom = r[1] + r[3]
+        return any(abs(bottom - s[1]) <= _GTOL and _xov(r, s) >= 8.0
+                   for _j, s in solids)
+    if d == "down":
+        return any(j in grounded
+                   and abs(r[1] - (s[1] + s[3])) <= _GTOL
+                   and _xov(r, s) >= 8.0
+                   for j, s in solids)
+    for _j, s in solids:
+        if _yov(r, s) >= 8.0:
+            if abs((r[0] + r[2]) - s[0]) <= _GTOL \
+                    or abs(r[0] - (s[0] + s[2])) <= _GTOL:
+                return True
+    return False
+
+
+def _repair_spikes_columns(c, plats, hazards, spawn, door_pos):
+    """Pit-floor strips under unseated up-spikes and columns, side
+    walls for unseated side spikes. Down-spikes are gantry-owned
+    (see _add_gantries); spikes at the very bottom line have no
+    room for a floor and are builder-owned (D01/D34 pit floors)."""
+    bar_y = float(c.bar_y)
+    for h in hazards:
+        t = h.get("type")
+        grounded, rects = _grounded_solids_gen(plats, bar_y)
+        if t == "spikes" and not _spikes_seated_gen(h, plats, rects,
+                                                    grounded):
+            d = h.get("dir", "up")
+            x, y, w, hh = (float(h[k]) for k in ("x", "y", "w", "h"))
+            if d == "up":
+                bottom = y + hh
+                if bottom > bar_y - 16.0:
+                    continue
+                w2 = max(w, 48.0)
+                x2 = min(max(x, 0.0), c.width - w2)
+                rect = (x2, bottom, w2, bar_y - bottom)
+                if _blocks_spawn_door(c, rect, spawn, door_pos):
+                    continue
+                if _rect_hazard_overlap(rect, hazards):
+                    continue
+                if not _has_rect(plats, rect):
+                    plats.append(plat(x2, bottom, w2, bar_y - bottom,
+                                      "solid"))
+            elif d in ("left", "right"):
+                for wx in (x + w, x - 48.0):
+                    if wx < 0 or wx + 48.0 > c.width:
+                        continue
+                    support = _support_top_below(
+                        rects, grounded, wx, wx + 48.0, y + hh)
+                    bottom = bar_y if support is None else support
+                    if bottom - y < 16.0:
+                        bottom = bar_y
+                    rect = (wx, y, 48.0, bottom - y)
+                    if _blocks_spawn_door(c, rect, spawn, door_pos):
+                        continue
+                    if _rect_hazard_overlap(rect, hazards):
+                        continue
+                    if _has_rect(plats, rect):
+                        break
+                    plats.append(plat(wx, y, 48, bottom - y, "solid"))
+                    break
+        elif t == "spiked_column":
+            r = (float(h["x"]), float(h["y"]), float(h["w"]),
+                 float(h["h"]))
+            bottom, top = r[1] + r[3], r[1]
+            solids = [rects[j] for j in range(len(rects))
+                      if plats[j]["kind"] == "solid"]
+            on_top = abs(bottom - bar_y) <= _GTOL or any(
+                abs(bottom - s[1]) <= _GTOL and _xov(r, s) >= 8.0
+                for s in solids)
+            hung = any(j in grounded
+                       and abs(top - (rects[j][1] + rects[j][3])) <= _GTOL
+                       and _xov(r, rects[j]) >= 8.0
+                       for j in range(len(rects)))
+            if on_top or hung:
+                continue
+            if bottom > bar_y - 16.0:
+                continue
+            w2 = max(r[2], 48.0)
+            x2 = min(max(r[0], 0.0), c.width - w2)
+            rect = (x2, bottom, w2, bar_y - bottom)
+            if _blocks_spawn_door(c, rect, spawn, door_pos):
+                continue
+            if _rect_hazard_overlap(rect, hazards):
+                continue
+            if not _has_rect(plats, rect):
+                plats.append(plat(x2, bottom, w2, bar_y - bottom,
+                                  "solid"))
+
+
+def repair_grounding(c, plats, hazards, spawn, door_pos):
+    """Grounding repair entry point. Appends support geometry to
+    plats in place. Order matters: solids first (pillars need
+    grounded supports), then shaft walls, then gantry beams (which
+    need grounded walls), then saw rails/posts, then spike and
+    column seats. Repeat solids passes catch anything the new
+    walls now support."""
+    _ground_solids(c, plats, hazards, spawn, door_pos)
+    _flank_specials(c, plats, hazards, spawn, door_pos)
+    _ground_solids(c, plats, hazards, spawn, door_pos)
+    _add_gantries(c, plats, hazards, spawn, door_pos)
+    _ground_solids(c, plats, hazards, spawn, door_pos)
+    _repair_saws(c, plats, hazards, spawn, door_pos)
+    _repair_spikes_columns(c, plats, hazards, spawn, door_pos)
+    _ground_solids(c, plats, hazards, spawn, door_pos)
+
+
+# ---------------------------------------------------------------------------
+# Core-middle dressing (Loop 3): fill the visibly empty band y 260..420
+# on flat archetypes (ceiling beam stack + floor-line gimmick only).
+# Runs AFTER the builder + repair passes, in main() and _finish_candidate
+# alike. Skips levels that already meet the rule-9 core-middle floor.
+# Vocabulary is solids only: floor pillars (tops 400..416, rise <= 100
+# so the checker graph and the autopilot's wall-jump both clear them),
+# one mid beam at y 260..268 (bottom <= 284, clear of the jump-arc head
+# apex ~297 on low routes), and connector bars resting on that beam.
+# No hanging hazards: a hanging column's bottom in the arc band makes
+# the greedy autopilot jump into it. No full-width solids in the middle
+# below the beam (they would seal routes); every addition is checked
+# against the connectivity flood-fill and the real checker decides.
+# Pillars keep >= 200px from every ground hazard/saw sweep/hanging-
+# pillar fall column and >= 120px from every gap/stone (drop-off
+# travel from a pillar top is ~104px; a shorter pillar->hazard gap
+# kills the autopilot -- ablation-proven), and the beam is gated
+# off any level with a raised takeoff.
+# ---------------------------------------------------------------------------
+
+def _dressing_blocked_intervals(c, plats, hazards, spawn, door_pos,
+                              hazard_buffer=200.0):
+    """x-intervals dressing pillars must avoid: floor gaps, special
+    platforms (swept), ground-level hazard jump zones, saw sweeps,
+    pillar fall columns, and the spawn/door approaches. Buffers are
+    NEVER relaxed: a pillar followed within ~200px by a hazard kills
+    the autopilot (it drops off the pillar top and lands with no
+    grounded run-up before the hazard -- proven by ablation: a 210px
+    pillar->saw gap passes, 90px fails at every pillar height).
+    Gap/stone buffers are 120px (drop-off travel from a pillar top
+    is ~104px); saw sweeps and hanging-pillar fall columns get the
+    full 200px hazard buffer."""
+    intervals = [(float(spawn[0]) - 70.0, float(spawn[0]) + 70.0),
+                 (float(door_pos[0]) - 100.0, float(door_pos[0]) + 100.0)]
+    floors = sorted([p for p in plats
+                     if p["kind"] == "solid" and p["y"] == FLOOR_TOP],
+                    key=lambda p: p["x"])
+    for a, b in zip(floors, floors[1:]):
+        if b["x"] > a["x"] + a["w"]:
+            intervals.append((a["x"] + a["w"] - 120.0, b["x"] + 120.0))
+    for p in plats:
+        if p["kind"] in ("dashed", "falling", "tilting", "moving"):
+            x0, x1, _y0, _y1 = _swept_extent(p)
+            intervals.append((x0 - 120.0, x1 + 120.0))
+    for h in hazards:
+        t = h.get("type")
+        if t == "dotted_line":
+            continue
+        if t == "saw":
+            bb = check_levels.saw_swept_bbox(h)
+            intervals.append((bb[0] - hazard_buffer,
+                              bb[0] + bb[2] + hazard_buffer))
+        elif t == "hanging_pillar":
+            # Fall column: same 200px buffer as ground hazards.
+            # Ablation-proven (D06S1V1): a floor pillar 84px short
+            # of the fall column killed the autopilot -- the drop-off
+            # from the pillar top lands inside the pillar zone.
+            intervals.append((float(h["x"]) - 200.0,
+                              float(h["x"]) + float(h["w"]) + 200.0))
+        elif hazard_buffer > 0.0 \
+                and float(h["y"]) + float(h["h"]) > 380.0:
+            intervals.append((float(h["x"]) - hazard_buffer,
+                              float(h["x"]) + float(h["w"])
+                              + hazard_buffer))
+    return intervals
+
+
+def _pillar_ok(c, rect, hazards, spawn, door_pos, intervals):
+    if _blocks_spawn_door(c, rect, spawn, door_pos):
+        return False
+    if _rect_hazard_overlap(rect, hazards):
+        return False
+    if any(_overlaps(rect[0], rect[0] + rect[2], e0, e1)
+           for (e0, e1) in intervals):
+        return False
+    for h in hazards:
+        if h.get("type") != "dotted_line":
+            continue
+        hr = (float(h["x"]), float(h["y"]), float(h["w"]),
+              float(h["h"]))
+        if _xov(rect, hr) > 0.0 and _yov(rect, hr) > 0.0:
+            return False
+    return True
+
+
+def _widen_core_rects(c, plats, hazards, spawn, door_pos, kk, salt):
+    """Widen existing non-edge core rects by 32px when the core-middle
+    count is met but the combined width is short (e.g. D31 shafts:
+    3 x 48px = 144 < 160). Widening never crosses a screen edge (the
+    rect must stay non-edge to keep counting) and never covers a
+    hazard rect beyond tolerance. Returns the number widened."""
+    core_idx = [i for i, p in enumerate(plats)
+                if p["kind"] == "solid" and p["x"] != 0
+                and p["x"] + p["w"] != c.width
+                and p["y"] < 420 and p["y"] + p["h"] > 260]
+    order = sorted(core_idx, key=lambda i: _mix(kk, salt + 300 + i))
+    widened = 0
+    for i in order:
+        _cnt, width = _core_middle_stats(plats, c.width)
+        if width >= 160.0:
+            break
+        p = plats[i]
+        sides = ["left", "right"] if _mix(kk, salt + 310 + i) % 2 == 0 \
+            else ["right", "left"]
+        for side in sides:
+            if side == "left":
+                strip = (float(p["x"]) - 32.0, float(p["y"]), 32.0,
+                         float(p["h"]))
+                nx, nw = p["x"] - 32, p["w"] + 32
+            else:
+                strip = (float(p["x"]) + float(p["w"]), float(p["y"]),
+                         32.0, float(p["h"]))
+                nx, nw = p["x"], p["w"] + 32
+            if nx <= 0 or nx + nw >= c.width:
+                continue
+            if _rect_hazard_overlap(strip, hazards):
+                continue
+            if _blocks_spawn_door(c, strip, spawn, door_pos):
+                continue
+            old_x, old_w = p["x"], p["w"]
+            p["x"], p["w"] = int(nx), int(nw)
+            if not _route_connected(c, plats, spawn, door_pos):
+                p["x"], p["w"] = old_x, old_w
+                continue
+            widened += 1
+            break
+    return widened
+
+
+def _add_beam_bars(c, kk, salt, plats, hazards, spawn, door_pos,
+                   beam_top):
+    """Connector bars between the ceiling beam stack and the mid beam.
+    Each bar rests on the mid beam (bottom = beam_top + 4, within the
+    4px resting tolerance) and overlaps the lowest stack beam covering
+    its x-span by 8px, so it reads as one joined structure. At most
+    2 bars, >= 160px apart. Returns the number added."""
+    placed = []
+    xs = list(range(120, 1121, 80))
+    order = sorted(range(len(xs)),
+                   key=lambda i: _mix(kk, salt + 320 + i))
+    for oi in order:
+        if len(placed) >= 2:
+            break
+        bx = float(xs[oi])
+        bw = float(g(kk, [48, 64], salt=salt + 330 + len(placed)))
+        anchor_bottom = None
+        for p in plats:
+            if p["kind"] != "solid" or p["h"] > 24:
+                continue
+            if p["x"] <= bx and p["x"] + p["w"] >= bx + bw:
+                bottom = float(p["y"]) + float(p["h"])
+                if bottom <= beam_top - 4.0 and bottom >= 100.0:
+                    if anchor_bottom is None or bottom > anchor_bottom:
+                        anchor_bottom = bottom
+        if anchor_bottom is None:
+            continue
+        top = anchor_bottom - 8.0
+        bottom = float(beam_top) + 4.0
+        if bottom - top < 16.0 or top < _KEEPOUT_Y:
+            continue
+        rect = (bx, top, bw, bottom - top)
+        if _blocks_spawn_door(c, rect, spawn, door_pos):
+            continue
+        if _rect_hazard_overlap(rect, hazards):
+            continue
+        if any(abs(bx - px) < 160.0 for px in placed):
+            continue
+        plats.append(plat(bx, top, bw, bottom - top, "solid"))
+        placed.append(bx)
+    return len(placed)
+
+
+def _try_mid_beam(c, kk, salt, plats, hazards, spawn, door_pos):
+    """One full-width mid beam (y 260..268) on the existing edge
+    walls, plus connector bars. Gated: no route platform top in
+    [260, 481) -- a jump from such a takeoff reaches the beam band
+    (head apex crosses y 260..284), and the checker blocker rule
+    does not catch it (beam bottom 284 < top_min - apex for those
+    takeoffs), so the beam would head-bump the autopilot on raised
+    stones/steps. Full-width thin beams (the ceiling stack itself)
+    are excluded from the gate: the hero never stands on them.
+    Also requires edge walls spanning the beam band and no rect
+    hazard crossing the beam. Beam bottom <= 284 stays clear of the
+    jump-arc head apex (~297 physical, ~303 checker) on floor-level
+    routes. Returns the number of rects added."""
+    for p in plats:
+        if p["w"] >= 1000 and p["h"] <= 20:
+            continue
+        tops = [float(p["y"])]
+        if p["kind"] == "moving":
+            tops.append(float(p["y"]) + float(p.get("dy", 0)))
+        if any(260.0 <= t < 481.0 for t in tops):
+            return 0
+    for side in (0.0, float(c.width) - 48.0):
+        if not any(p["kind"] == "solid" and float(p["x"]) == side
+                   and float(p["y"]) <= 268.0
+                   and float(p["y"]) + float(p["h"]) >= 284.0
+                   for p in plats):
+            return 0
+    tops = [260, 264, 268]
+    rot = _mix(kk, salt + 340) % len(tops)
+    tops = tops[rot:] + tops[:rot]
+    for top in tops:
+        rect = (48.0, float(top), float(c.width) - 96.0, 16.0)
+        if _blocks_spawn_door(c, rect, spawn, door_pos):
+            continue
+        if _rect_hazard_overlap(rect, hazards):
+            continue
+        # Keep the beam clear of other thin horizontal solids in its
+        # band (no merged slabs); vertical walls may cross it.
+        if any(p["kind"] == "solid" and p["h"] <= 20
+               and _xov(rect, _pr(p)) > 48.0
+               and _yov(rect, _pr(p)) > 0.0 for p in plats):
+            continue
+        plats.append(plat(48, top, c.width - 96, 16, "solid"))
+        return 1 + _add_beam_bars(c, kk, salt, plats, hazards,
+                                  spawn, door_pos, top)
+    return 0
+
+
+def _add_dressing_pillars(c, kk, salt, plats, hazards, spawn, door_pos,
+                          want, intervals, min_gap, existing=()):
+    """Grounded floor pillars (bottom at the control-bar line, tops
+    400..416). Seeded x-order over a 40px grid, seeded widths/heights,
+    >= min_gap from each other and from `existing` rects. Returns the
+    rects added."""
+    xs = list(range(160, 1121, 40))
+    order = sorted(range(len(xs)),
+                   key=lambda i: _mix(kk, salt + 350 + i))
+    picked = []
+    for oi in order:
+        if len(picked) >= want:
+            break
+        x0 = float(xs[oi])
+        # Width/height vary per candidate, not per pick: a wide draw
+        # must not poison every candidate when a narrow one fits.
+        w = float(g(kk, [48, 64, 80, 96], salt=salt + 360 + oi * 3))
+        top = float(g(kk, [400, 404, 408, 412, 416],
+                      salt=salt + 370 + oi * 3))
+        if x0 + w > float(c.width):
+            continue
+        rect = (x0, top, w, float(c.bar_y) - top)
+        if not _pillar_ok(c, rect, hazards, spawn, door_pos, intervals):
+            continue
+        if any(min(abs(rect[0] - (q[0] + q[2])),
+                    abs(q[0] - (rect[0] + rect[2]))) < min_gap
+               for q in list(picked) + list(existing)):
+            continue
+        plats.append(plat(x0, top, w, c.bar_y - top, "solid"))
+        picked.append(rect)
+    return picked
+
+
+def _add_stacked_pillars(c, kk, salt, plats, hazards, spawn, door_pos):
+    """Pillars stacked on wide raised platforms (blocks, steps: tops
+    380..440, width >= 120). Each pillar rests on its support's top
+    (grounded by resting) and stands on the FAR edge -- the edge
+    opposite the spawn side. Ablation-proven: an arrival-edge pillar
+    deflects the landing jump into the block's side spikes (2/2
+    deaths), while a far-edge pillar passes at every height (3/3),
+    because the hero lands on the open part of the support, climbs
+    the pillar, and drops clear beyond it. Returns rects added."""
+    supports = [p for p in plats
+                if p["kind"] == "solid" and 380.0 <= float(p["y"]) < 440.0
+                and float(p["w"]) >= 120.0]
+    order = sorted(range(len(supports)),
+                   key=lambda i: _mix(kk, salt + 410 + i))
+    added = []
+    for oi in order:
+        if len(added) >= 2:
+            break
+        count, width = _core_middle_stats(plats, c.width)
+        if count >= 2 and width >= 160.0:
+            break
+        sup = supports[oi]
+        sx, sy, sw = float(sup["x"]), float(sup["y"]), float(sup["w"])
+        w = float(g(kk, [48, 56, 64], salt=salt + 420 + oi))
+        height = float(g(kk, [80, 100, 120], salt=salt + 430 + oi))
+        top = max(260.0, sy - height)
+        if sy - top < 40.0:
+            continue
+        centre = sx + sw / 2.0
+        if float(spawn[0]) < centre:
+            px = sx + sw - w
+        else:
+            px = sx
+        rect = (px, top, w, sy - top)
+        if _blocks_spawn_door(c, rect, spawn, door_pos):
+            continue
+        if _rect_hazard_overlap(rect, hazards):
+            continue
+        plats.append(plat(px, top, w, sy - top, "solid"))
+        added.append(rect)
+        # Plinth: when the support's top sits at/below the core band
+        # edge (y >= 420) the support itself does not count, so the
+        # stacked pillar alone leaves count == 1. A 16px plinth under
+        # the pillar (pillar width + 48) is the second core rect and
+        # does not change the landing surface -- a full-width cap was
+        # ablation-proven lethal (it shifts the landing point into
+        # the block's side spikes), while the plinth passes clean.
+        count, width = _core_middle_stats(plats, c.width)
+        if (count < 2 or width < 160.0) and 420.0 <= sy < 436.0:
+            pw = w + 48.0
+            ppx, ppy = px - 24.0, sy - 16.0
+            prect = (ppx, ppy, pw, 16.0)
+            dotted = any(
+                h["type"] == "dotted_line"
+                and _overlap(prect, _rect_of(h))
+                for h in hazards)
+            if (0.0 <= ppx and ppx + pw <= 1280.0
+                    and not _blocks_spawn_door(c, prect, spawn,
+                                               door_pos)
+                    and not _rect_hazard_overlap(prect, hazards)
+                    and not dotted):
+                plats.append(plat(ppx, ppy, pw, 16.0, "solid"))
+                added.append(prect)
+    return added
+
+
+def add_core_middle_dressing(c, kk, salt, plats, hazards, spawn,
+                             door_pos):
+    """Fill the core middle (y 260..420) on levels that fail the
+    rule-9 core-middle floor. Uniform code path for all archetypes;
+    dense levels are skipped untouched. Returns the number of solid
+    rects added (widening counts as 0: it changes no rect count)."""
+    count, width = _core_middle_stats(plats, c.width)
+    if count >= 2 and width >= 160.0:
+        return 0
+    base = len(plats)
+    if count >= 2:
+        _widen_core_rects(c, plats, hazards, spawn, door_pos, kk, salt)
+        count, width = _core_middle_stats(plats, c.width)
+        if count >= 2 and width >= 160.0:
+            return 0
+    _try_mid_beam(c, kk, salt, plats, hazards, spawn, door_pos)
+    intervals = _dressing_blocked_intervals(c, plats, hazards, spawn,
+                                            door_pos)
+    want = g(kk, [2, 2, 3], salt=salt + 380)
+    picked = _add_dressing_pillars(c, kk, salt, plats, hazards, spawn,
+                                   door_pos, want, intervals, 200.0)
+    # Second/third passes top the pillars up to `want` (same
+    # intervals -- hazard/gap buffers are never relaxed -- differing
+    # only in gap and salt, so different widths/x-orders get tried).
+    # The metric top-up below adds still more only while the floor
+    # is unmet.
+    intervals2 = _dressing_blocked_intervals(
+        c, plats, hazards, spawn, door_pos)
+    if len(picked) < want:
+        picked += _add_dressing_pillars(
+            c, kk, salt + 390, plats, hazards, spawn, door_pos,
+            want - len(picked), intervals2, 160.0, existing=picked)
+    count, width = _core_middle_stats(plats, c.width)
+    if count < 2 or width < 160.0:
+        picked += _add_dressing_pillars(
+            c, kk, salt + 400, plats, hazards, spawn, door_pos,
+            2, intervals2, 160.0, existing=picked)
+        count, width = _core_middle_stats(plats, c.width)
+    if count < 2 or width < 160.0:
+        # Stacked pillars on blocks/steps (far edge only): the only
+        # route-safe fill where the beam is gated off and no quiet
+        # floor stretch exists (D18 wall-spikes).
+        _add_stacked_pillars(c, kk, salt, plats, hazards, spawn,
+                             door_pos)
+        count, width = _core_middle_stats(plats, c.width)
+    if count >= 2 and width < 160.0:
+        _widen_core_rects(c, plats, hazards, spawn, door_pos, kk, salt)
+    # Connectivity guard: dressing must never seal the route. Drop
+    # added rects last-first until the flood-fill connects again.
+    while len(plats) > base and not _route_connected(c, plats, spawn,
+                                                     door_pos):
+        plats.pop()
+    return len(plats) - base
+
+
+# ---------------------------------------------------------------------------
+# Decoration pass (Loop 4): draw-only background silhouettes for the
+# rule-9 core-middle floor. Runs AFTER the solid dressing pass +
+# repair, ONLY on levels still failing the core-middle floor after
+# solid dressing (skip-if-dense). Decorations have NO collision and NO
+# gameplay effect, so placement needs NO route buffers (the solid
+# dressing buffers are never imported here); the per-candidate checker
+# run + retry loop absorbs placement failures. This pass NEVER mutates
+# platforms/hazards/spawn/door: it only reads them and returns a list
+# of {x, y, w, h} dicts (empty when the level is already dense or no
+# valid silhouette fits). Deterministic: _mix/g/sh only, no RNG state.
+# ---------------------------------------------------------------------------
+
+_CORE_TOP = 260       # rule-9 core-middle band (mirrors the checker)
+_CORE_BOTTOM = 420
+
+
+def _deco_touches_gen(a, b):
+    """Mirror of check_levels.LevelCheck._deco_touches: area overlap,
+    or a <= 4px gap on one axis with positive overlap on the other."""
+    xov = min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0])
+    yov = min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1])
+    if xov > 0 and yov > 0:
+        return True
+    if xov > 0 and -_GTOL <= yov <= 0:
+        return True
+    if yov > 0 and -_GTOL <= xov <= 0:
+        return True
+    return False
+
+
+def _deco_block_rects(hazards):
+    """Hazard blocking rects for rule 10: rect hazards as-is, saws as
+    their swept disc bbox (a saw's x/y is its centre, so its
+    (x, y, w, h) is not a rect)."""
+    rects = []
+    for h in hazards:
+        if h.get("type") == "saw":
+            try:
+                rects.append(check_levels.saw_swept_bbox(h))
+            except Exception:
+                continue
+        else:
+            rects.append((float(h["x"]), float(h["y"]),
+                          float(h["w"]), float(h["h"])))
+    return rects
+
+
+def _core_middle_stats_with_deco(platforms, decos, width):
+    """Rule-9 core-middle floor counting solid + decoration rects
+    together (mirrors check_levels.check_density_floor exactly):
+    non-edge rects intersecting y 260..420, combined full width."""
+    count, total = _core_middle_stats(platforms, width)
+    for d in decos:
+        x, y, w, h = (float(d[k]) for k in ("x", "y", "w", "h"))
+        if x == 0 or x + w == width:
+            continue
+        if y < _CORE_BOTTOM and y + h > _CORE_TOP:
+            count += 1
+            total += w
+    return count, total
+
+
+def _deco_candidates(c, kk, salt, plats):
+    """Candidate silhouettes from the four vocabularies, in seeded
+    order. Candidates are (x, y, w, h) int tuples; validity (bounds,
+    hazard/spawn/door overlap, attachment, separation) is checked by
+    the picker, never assumed here."""
+    solids = [_pr(p) for p in plats if p.get("kind") == "solid"]
+    cands = []
+    # (i) Floor pillars: bottom y=500, varied tops, standing on
+    # floor-top solids.
+    for si, s in enumerate(solids):
+        if abs(s[1] - FLOOR_TOP) > _GTOL:
+            continue
+        for j in range(3):
+            w = g(kk, [48, 64, 80, 96, 120], salt=salt + 910 + si * 7 + j)
+            top = g(kk, [280, 300, 320, 340, 360, 380, 400],
+                    salt=salt + 911 + si * 7 + j)
+            span = int(s[2]) - w
+            if span < 0:
+                continue
+            x = int(s[0]) + (_mix(kk, salt + 912 + si * 7 + j)
+                             % (span + 1))
+            cands.append((x, top, w, FLOOR_TOP - top))
+    # (ii) Hanging blocks: tops attached to a ceiling-beam bottom,
+    # varied bottoms, >= 24px x-overlap with the beam.
+    for si, s in enumerate(solids):
+        bottom = s[1] + s[3]
+        if bottom < 150 or bottom > 280:
+            continue
+        for j in range(3):
+            w = g(kk, [48, 64, 80, 96, 120, 160],
+                  salt=salt + 920 + si * 7 + j)
+            bot = g(kk, [280, 300, 320, 340, 360, 380, 400],
+                    salt=salt + 921 + si * 7 + j)
+            if bot - bottom < 32:
+                continue
+            lo = int(s[0]) + 24 - w
+            hi = int(s[0] + s[2]) - 24
+            if hi < lo:
+                continue
+            x = lo + (_mix(kk, salt + 922 + si * 7 + j) % (hi - lo + 1))
+            cands.append((x, int(bottom), w, bot - int(bottom)))
+    # (iii) Edge shelves: attached to an edge wall at varied heights.
+    for si, s in enumerate(solids):
+        left = s[0] == 0
+        right = s[0] + s[2] == c.width
+        if not (left or right):
+            continue
+        for j in range(3):
+            w = g(kk, [48, 64, 80, 96], salt=salt + 930 + si * 7 + j)
+            h = g(kk, [16, 24, 32, 48, 64], salt=salt + 931 + si * 7 + j)
+            y = g(kk, [260, 280, 300, 320, 340, 360, 380],
+                  salt=salt + 932 + si * 7 + j)
+            if left:
+                x = int(s[0] + s[2])
+            else:
+                x = int(s[0]) - w
+            cands.append((x, y, w, h))
+    # (iv) Mid blocks: attached to a solid pillar/beam side, >= 16px
+    # y-overlap with the solid.
+    for si, s in enumerate(solids):
+        if s[2] < 48 or s[3] < 32:
+            continue
+        for j in range(2):
+            w = g(kk, [48, 64, 80, 96, 120], salt=salt + 940 + si * 5 + j)
+            h = g(kk, [16, 32, 48, 64, 80], salt=salt + 941 + si * 5 + j)
+            lo = int(s[1]) + 16 - h
+            hi = int(s[1] + s[3]) - 16
+            if hi < lo:
+                continue
+            y = lo + (_mix(kk, salt + 942 + si * 5 + j) % (hi - lo + 1))
+            if j % 2 == 0:
+                x = int(s[0]) - w
+            else:
+                x = int(s[0] + s[2])
+            cands.append((x, y, w, h))
+    # Seeded order: deterministic shuffle by mix key.
+    order = sorted(range(len(cands)),
+                   key=lambda i: _mix(kk, salt + 950 + i))
+    return [cands[i] for i in order]
+
+
+def _visually_dense_middle(platforms, width):
+    """Loop 5 visual density test: True only when real solid mass
+    already fills the middle band. Counts non-edge solid rects whose
+    intersection with y 280..480 is >= 40px tall (a thick middle
+    presence, not a thin bar grazing the band); requires >= 2 such
+    rects with combined width >= 160px. Ceiling-beam bars (thin,
+    high) and edge walls (edge-touching) cannot satisfy it alone.
+    Used ONLY as an additional skip condition for the decoration
+    pass; the rule-9 floor itself is unchanged (checker-owned)."""
+    count = 0
+    total = 0.0
+    for p in platforms:
+        if p["kind"] != "solid":
+            continue
+        if p["x"] == 0 or p["x"] + p["w"] == width:
+            continue
+        overlap = min(p["y"] + p["h"], 480) - max(p["y"], 280)
+        if overlap >= 40:
+            count += 1
+            total += p["w"]
+    return count >= 2 and total >= 160.0
+
+
+def add_decorations(c, kk, salt, plats, hazards, spawn, door_pos):
+    """Loop 4 decoration pass. Returns a list of {x, y, w, h} dicts
+    (possibly empty). Skip-if-dense: levels already meeting the
+    rule-9 core-middle floor on solids alone AND passing the Loop 5
+    visual density test get no decorations. Otherwise emits 2-4
+    silhouettes (seeded vocabulary, greedy pick)
+    until the combined solid + decoration core-middle floor is met.
+    Never mutates its inputs. The checker re-validates every rule;
+    this pass only constructs rule-10-valid candidates."""
+    count, width = _core_middle_stats(plats, c.width)
+    if count >= 2 and width >= 160.0 \
+            and _visually_dense_middle(plats, c.width):
+        return []
+    solids = [_pr(p) for p in plats if p.get("kind") == "solid"]
+    blockers = _deco_block_rects(hazards)
+    hero = (float(spawn[0]) - 12.0, float(spawn[1]) - 44.0, 24.0, 44.0)
+    door = (float(door_pos[0]) - c.door_w / 2.0,
+            float(door_pos[1]) - c.door_h, c.door_w, c.door_h)
+    picked = []
+
+    def _hits_hazard(r):
+        for b in blockers:
+            if _xov(r, b) > 0 and _yov(r, b) > 0:
+                return True
+        return False
+
+    def _separated(r):
+        # Silhouettes stay cleanly separated: >= 8px gap from every
+        # already-picked deco (one-sided 8px expansion test).
+        exp = (r[0] - 8, r[1] - 8, r[2] + 16, r[3] + 16)
+        for q in picked:
+            if _xov(exp, q) > 0 and _yov(exp, q) > 0:
+                return False
+        return True
+
+    def _attached(r):
+        if any(_deco_touches_gen(r, s) for s in solids):
+            return True
+        return any(_deco_touches_gen(r, q) for q in picked)
+
+    for cand in _deco_candidates(c, kk, salt, plats):
+        if len(picked) >= 4:
+            break
+        x, y, w, h = (float(v) for v in cand)
+        r = (x, y, w, h)
+        # Bounds + minima + keep-out (rule 10).
+        if x < 0 or x + w > c.width or y < _KEEPOUT_Y \
+                or y + h > c.bar_y:
+            continue
+        if w < 48 or h < 16:
+            continue
+        # Non-edge + core-band intersection (must help the floor).
+        if x == 0 or x + w == c.width:
+            continue
+        if not (y < _CORE_BOTTOM and y + h > _CORE_TOP):
+            continue
+        if _hits_hazard(r):
+            continue
+        if (_xov(r, hero) > 0 and _yov(r, hero) > 0) or \
+                (_xov(r, door) > 0 and _yov(r, door) > 0):
+            continue
+        if not _separated(r):
+            continue
+        if not _attached(r):
+            continue
+        picked.append(r)
+        # Stop once the combined floor is met with >= 2 silhouettes.
+        if len(picked) >= 2:
+            n, tw = _core_middle_stats_with_deco(
+                plats, [{"x": q[0], "y": q[1], "w": q[2], "h": q[3]}
+                        for q in picked], c.width)
+            if n >= 2 and tw >= 160.0:
+                break
+    return [{"x": int(q[0]), "y": int(q[1]), "w": int(q[2]), "h": int(q[3])}
+            for q in picked]
 
 # ---------------------------------------------------------------------------
 # Builders: doors 1-22. Each fn(c, kk, salt) -> (platforms, hazards,
@@ -497,9 +1832,12 @@ def b_pitfall(c, kk, salt):
                   phase=phase, on_time=on),
              floor_seg(c, dx + dw, fx),
              plat(fx, FLOOR_TOP, fw, 20, "falling", stand_time=stand),
-             floor_seg(c, fx + fw, 1280)]
-    hazards = [spikes_up(dx + 20, dw - 40, top=c.bar_y),
-               spikes_up(fx + 20, fw - 40, top=c.bar_y)]
+             floor_seg(c, fx + fw, 1280),
+             plat(dx + 20, c.bar_y - 24, dw - 40, 24, "solid"),
+             plat(fx + 20, c.bar_y - 24, fw - 40, 24, "solid")]
+    pit_top = c.bar_y - 24
+    hazards = [spikes_up(dx + 20, dw - 40, top=pit_top),
+               spikes_up(fx + 20, fw - 40, top=pit_top)]
     sw = g(kk, [60, 80], salt=salt + 6)
     hazards.append(spikes_up(dx - 40 - sw, sw))
     lead = g(kk, [160, 190, 220], salt=salt + 7)
@@ -616,10 +1954,15 @@ def b_periodic_pillars(c, kk, salt):
 
 def b_swing_saws(c, kk, salt):
     piv_x = 600 + sh(kk, 40, 4, salt=salt + 1)
-    piv_y = g(kk, [120, 140], salt=salt + 1)
-    rest_y = g(kk, [425, 430, 435], salt=salt + 1)
     r = g(kk, [30, 32, 34], salt=salt + 1)
-    arc = g(kk, [50, 60, 70], salt=salt + 1)
+    # Floor-grazing shallow swing (rule 7): the disc must touch solid
+    # over its full sweep, so it grazes the floor with a small arc
+    # (endpoint rise <= ~3px) and the pivot hangs from a gantry beam
+    # added by the grounding repair.
+    rest_y = FLOOR_TOP - r + 2
+    arm = g(kk, [260, 280, 300], salt=salt + 1)
+    piv_y = rest_y - arm
+    arc = g(kk, [12, 14, 16], salt=salt + 1)
     period = g(kk, [3.4, 3.8, 4.2], salt=salt + 1)
     hazards = [saw_swing(piv_x, rest_y, piv_x, piv_y, arc, period, r)]
     dotted(hazards, piv_x - 40, 200, 80, 8, 0)
@@ -634,9 +1977,11 @@ def b_swing_saws(c, kk, salt):
 def b_patrol_saws(c, kk, salt):
     cx = 580 + sh(kk, 40, 4, salt=salt + 1)
     r = g(kk, [28, 30, 32], salt=salt + 1)
-    y2 = g(kk, [348, 358, 368], salt=salt + 1)
+    # Horizontal patrol grazing the floor (rule 7): a vertical patrol
+    # can never touch solid over its sweep without blocking the route.
+    dx = g(kk, [60, 80, -60, -80], salt=salt + 1)
     period = g(kk, [3.0, 3.4, 3.8], salt=salt + 1)
-    hazards = [saw_path(cx, 468, cx, y2, period, r)]
+    hazards = [saw_path(cx, 470, cx + dx, 470, period, r)]
     if kk % 2 == 0:
         hazards.append(spikes_up(cx + 170,
                                  g(kk, [60, 80, 100], salt=salt + 3)))
@@ -810,10 +2155,14 @@ def b_ceiling_spikes(c, kk, salt):
 def b_wall_spikes(c, kk, salt):
     lx = 520 + sh(kk, 40, 4, salt=salt + 1)
     lw = g(kk, [180, 220], salt=salt + 1)
-    ly = g(kk, [280, 296], salt=salt + 1)
-    plats = [floor_seg(c, 0, 1280), plat(lx, ly, lw, 24, "solid")]
-    hazards = [spikes_side(lx - 20, ly, 20, 24, "left"),
-               spikes_side(lx + lw, ly, 20, 24, "right"),
+    # Floor block with side spikes (rule 7): the v1 floating ledge
+    # cannot be supported without blocking the walk-under route, so
+    # the spikes now guard the sides of a jumpable floor block.
+    bh = g(kk, [80, 90, 100], salt=salt + 1)
+    plats = [floor_seg(c, 0, 1280),
+             plat(lx, FLOOR_TOP - bh, lw, bh + 80, "solid")]
+    hazards = [spikes_side(lx - 20, FLOOR_TOP - bh, 20, 24, "left"),
+               spikes_side(lx + lw, FLOOR_TOP - bh, 20, 24, "right"),
                spikes_up(200 + (kk % 3) * 40,
                          g(kk, [60, 80, 100], salt=salt + 3))]
     hx = min(lx + lw + 200 + (kk % 2) * 40, 960)
@@ -874,13 +2223,17 @@ def b_pit_bridges(c, kk, salt):
     w = {220: 70, 240: 80, 260: 90}[pw]
     kind1 = g(kk, ["falling", "tilting"], salt=salt + 1)
     kind2 = g(kk, ["falling", "tilting"], salt=salt + 2)
-    x1 = px + 20
-    x2 = x1 + w + 30
+    x1 = px + 8
+    x2 = px + pw - w - 4
     s1 = plat(x1, FLOOR_TOP, w, 20, kind1,
               stand_time=g(kk, [1.0, 1.2, 1.4], salt=salt + 1))
     s2 = plat(x2, FLOOR_TOP, w, 20, kind2,
               stand_time=g(kk, [1.0, 1.2, 1.4], salt=salt + 2))
-    plats = [floor_seg(c, 0, px), s1, s2, floor_seg(c, px + pw, 1280)]
+    # Solid divider between the stones: both stones are shaft-flanked
+    # (4px gaps to the divider and the pit walls) with no under-pillars.
+    plats = [floor_seg(c, 0, px), s1,
+             plat(x1 + w + 4, FLOOR_TOP, 60, 80, "solid"), s2,
+             floor_seg(c, px + pw, 1280)]
     hx = px + pw + 150 + (kk % 2) * 40
     hazards = [spikes_up(min(hx, 960), g(kk, [60, 80], salt=salt + 3))]
     spawn, door = flat_spawn_door(kk, salt)
@@ -940,8 +2293,9 @@ def b_timed_mixes(c, kk, salt):
                              phase=g(kk, [0.0, 0.5, 1.0], salt=salt + 2),
                              on_time=pon))
     dotted(hazards, px, 420, 100, 8, idx)
-    sx = min(gx + gw + 280, 1000)  # swept bbox must clear door safe zone
-    hazards.append(saw_path(sx, 468, sx, g(kk, [348, 358], salt=salt + 3),
+    sx = min(gx + gw + 280, 980)  # swept bbox must clear door safe zone
+    dx = g(kk, [60, 80, -60, -80], salt=salt + 3)
+    hazards.append(saw_path(sx, 470, sx + dx, 470,
                             g(kk, [3.0, 3.4], salt=salt + 3),
                             g(kk, [28, 30], salt=salt + 3)))
     spawn, door = flat_spawn_door(kk, salt)
@@ -1068,6 +2422,10 @@ def _tower_level(c, kk, salt, cfg):
     E2 = E1 + G
     padw = g(kk, cfg["padw"], salt=salt + 2)
     PR = min(E2 + padw, 1070)
+    if cfg["dashed"]:
+        # Dashed floors need shaft walls on BOTH ends: the right
+        # wall must clear the door safe zone, so cap the pad edge.
+        PR = min(PR, 1050)
     tops = [T, T + S, T + 2 * S, T + 3 * S]
 
     def dashed_floor(x, top, w, j):
@@ -1080,7 +2438,8 @@ def _tower_level(c, kk, salt, cfg):
     if cfg["dashed"]:
         plats = [plat(0, tops[0], E1, 20, "solid"),
                  dashed_floor(E2, tops[1], PR - E2, 1),
-                 dashed_floor(0, tops[2], E1, 2),
+                 # Inset 48px: the left shaft wall needs room at x=0.
+                 dashed_floor(48, tops[2], E1 - 48, 2),
                  dashed_floor(E2, tops[3], PR - E2, 3),
                  floor_seg(c, 0, 1280)]
     else:
@@ -1144,7 +2503,7 @@ def _tower_level(c, kk, salt, cfg):
 
 def b_tower_descents(c, kk, salt):
     return _tower_level(c, kk, salt, {
-        "T": [100, 110, 120], "S": [90, 95], "E1": [780, 820, 860],
+        "T": [170, 180, 190], "S": [90, 95], "E1": [780, 820, 860],
         "G": [50, 60, 70], "padw": [150, 170, 190], "dashed": False,
         "f1_extra": "none", "f3_style": "strip", "ground_style": "column",
         "spawn_x": [80, 100, 120, 140],
@@ -1153,7 +2512,7 @@ def b_tower_descents(c, kk, salt):
 
 def b_dashed_towers(c, kk, salt):
     return _tower_level(c, kk, salt, {
-        "T": [105, 115], "S": [90, 95], "E1": [790, 830],
+        "T": [170, 180], "S": [90, 95], "E1": [790, 830],
         "G": [55, 65], "padw": [160, 180], "dashed": True,
         "f1_extra": "none", "f3_style": "strip", "ground_style": "plain",
         "spawn_x": [90, 110, 130], "door_x": [1140, 1160, 1180]})
@@ -1161,7 +2520,7 @@ def b_dashed_towers(c, kk, salt):
 
 def b_final_tower_saws(c, kk, salt):
     return _tower_level(c, kk, salt, {
-        "T": [90, 110, 130], "S": [92, 96], "E1": [760, 800, 840],
+        "T": [170, 180, 190], "S": [92, 96], "E1": [760, 800, 840],
         "G": [45, 60, 75], "padw": [150, 170], "dashed": False,
         "f1_extra": "column", "f3_style": "saw", "ground_style": "saws",
         "spawn_x": [70, 90, 110], "door_x": [1120, 1140, 1160, 1180]})
@@ -1373,8 +2732,13 @@ def b_drop_shafts(c, kk, salt):
     floors can never block lower drop edges), one wide shaft (380-420)
     no jump can clear. The autopilot drops the shaft; humans use the
     stacked floors. Floor hazards on the LOWER stacked floor are
-    floating only (its overlap landing zone spans the whole floor)."""
-    T1 = g(kk, [120, 130, 140], salt=salt + 1)
+    floating only (its overlap landing zone spans the whole floor).
+    Shaft walls span ONLY the inter-floor band (T1..T2) and rest on
+    the lower floors: full-height walls seal the floor route to the
+    door (connectivity rule 5 -- the shaft becomes a dead-end pocket).
+    Shaft mouths (entry + exit) stay open; wall spikes live only in
+    the walled band."""
+    T1 = g(kk, [150, 160, 170], salt=salt + 1)
     D = g(kk, [190, 200], salt=salt + 1)
     T2 = T1 + D
     sx = g(kk, [560, 600, 640], salt=salt + 2)
@@ -1384,7 +2748,13 @@ def b_drop_shafts(c, kk, salt):
              plat(rx, T1, 1280 - rx, 20, "solid"),
              plat(0, T2, sx, 20, "solid"),
              plat(rx, T2, 1280 - rx, 20, "solid"),
-             floor_seg(c, 0, 1280)]
+             floor_seg(c, 0, 1280),
+             # Shaft walls, inter-floor band only (rule 7: they rest
+             # on the lower floors; the wall spikes seat against
+             # their shaft faces). NO full-height columns: the floor
+             # route under the walls must stay open.
+             plat(sx - 48, T1, 48, D, "solid"),
+             plat(rx, T1, 48, D, "solid")]
     hazards = []
     hazards.append(spikes_up(200 + sh(kk, 40, 3, salt=salt + 3),
                              g(kk, [60, 80], salt=salt + 3), top=T1))
@@ -1396,14 +2766,13 @@ def b_drop_shafts(c, kk, salt):
     rf = g(kk, [26, 28], salt=salt + 4)
     hazards.append(saw_static(150 + sh(kk, 30, 3, salt=salt + 4),
                               T2 - 90, rf))
-    # Shaft wall spikes (between floors, clear of every walking band).
+    # Shaft wall spikes (upper band only, seated on the inter-floor
+    # walls, clear of every walking band). No lower-band spikes: with
+    # no wall face below T2, the repair would add a side wall down to
+    # the floor and re-seal the shaft mouth.
     y1 = T1 + 60
-    y2 = T2 + 60
-    hazards.append(spikes_side(sx - 24, y1, 24, 48, "right"))
-    hazards.append(spikes_side(rx, y1, 24, 48, "left"))
-    if kk % 2 == 0:
-        hazards.append(spikes_side(sx - 24, y2, 24, 48, "right"))
-        hazards.append(spikes_side(rx, y2, 24, 48, "left"))
+    hazards.append(spikes_side(sx, y1, 24, 48, "right"))
+    hazards.append(spikes_side(rx - 24, y1, 24, 48, "left"))
     # Ground: clear of the shaft landing zone (~sx+372).
     hazards.append(spikes_up(620 + sh(kk, 40, 2, salt=salt + 5),
                              g(kk, [60, 80], salt=salt + 5)))
@@ -1417,7 +2786,7 @@ def b_drop_shafts(c, kk, salt):
     if kk % 3 == 0:
         hazards.append(spikes_up(rx + 60, 80, top=T2))
     spawn = (g(kk, [80, 100, 120], salt=salt + 20), T1)
-    # Door x >= 1160: the y2 wall spike at rx (max 1060) + 24 must stay
+    # Door x >= 1160: the wall spike at rx (max 1060) + 24 must stay
     # 40px clear of the door rect (door.x - 27 >= 1133).
     door = (g(kk, [1160, 1180, 1200], salt=salt + 21), FLOOR_TOP)
     return plats, hazards, spawn, door
@@ -1427,7 +2796,7 @@ def b_zigzag_descents(c, kk, salt):
     """Short floating floors zigzagging down, joined by gap edges on
     one shared corridor boundary (no higher floor spans a corridor).
     The autopilot descends the left side; humans zigzag."""
-    T = g(kk, [90, 95, 100], salt=salt + 1)
+    T = g(kk, [150, 160, 170], salt=salt + 1)
     S = g(kk, [90, 95], salt=salt + 1)
     L = g(kk, [830, 850, 870], salt=salt + 2)
     G = g(kk, [40, 50, 60], salt=salt + 2)
@@ -1520,9 +2889,12 @@ def b_trigger_pits(c, kk, salt):
                       g(kk, [460, 470, 480], salt=salt + 2), 90, kk,
                       salt=salt + 2)
     plats = [floor_seg(c, 0, p1), s1, floor_seg(c, p1 + gw1, p2), s2,
-             floor_seg(c, p2 + gw2, 1280)]
-    hazards = [spikes_up(p1 + 20, gw1 - 40, top=c.bar_y),
-               spikes_up(p2 + 20, gw2 - 40, top=c.bar_y),
+             floor_seg(c, p2 + gw2, 1280),
+             plat(p1 + 20, c.bar_y - 24, gw1 - 40, 24, "solid"),
+             plat(p2 + 20, c.bar_y - 24, gw2 - 40, 24, "solid")]
+    pit_top = c.bar_y - 24
+    hazards = [spikes_up(p1 + 20, gw1 - 40, top=pit_top),
+               spikes_up(p2 + 20, gw2 - 40, top=pit_top),
                spikes_up(200, g(kk, [60, 80], salt=salt + 3))]
     tx1 = p1 + gw1 + 120
     tw1 = g(kk, [70, 80], salt=salt + 3)
@@ -1629,15 +3001,33 @@ def b_ceiling_gauntlets(c, kk, salt):
 def b_saw_corridors(c, kk, salt):
     cx0 = g(kk, [440, 480, 520], salt=salt + 1)
     cw = g(kk, [360, 400, 440], salt=salt + 1)
-    plats = [floor_seg(c, 0, 1280), plat(cx0, 300, cw, 20, "solid")]
+    # Tunnel ceiling: full-width beam on edge walls (rule 7: a
+    # floating corridor ceiling cannot be pillar-supported without
+    # blocking the corridor). The swing pivot hangs inside the beam.
+    # Beam heights span 140..280 (Loop 2): with only 3 heights the
+    # archetype's signature space (3 layouts x ~constant solution)
+    # was exhausted by the 14 existing levels, so no new draw could
+    # satisfy the >= 2-dims distinctness rule; 5 heights still
+    # saturated after 6 recovery picks. Heights stay inside the
+    # middle band (density rule 9 needs the beam's width there) and
+    # above the swing rest point (pivot inside the beam, disc
+    # grazing the floor over the full arc).
+    beam_top = g(kk, [140, 160, 180, 200, 220, 240, 260, 280],
+                 salt=salt + 1)
+    plats = [floor_seg(c, 0, 1280),
+             plat(48, beam_top, 1184, 20, "solid"),
+             plat(0, beam_top, 48, c.bar_y - beam_top, "solid"),
+             plat(1232, beam_top, 48, c.bar_y - beam_top, "solid")]
     pcx = cx0 + 110
     r = g(kk, [30, 32, 34], salt=salt + 2)
-    arc = g(kk, [50, 60, 70], salt=salt + 2)
+    arc = g(kk, [12, 14, 16], salt=salt + 2)
     period = g(kk, [3.4, 3.8, 4.2], salt=salt + 2)
-    hazards = [saw_swing(pcx, 430, pcx, 300, arc, period, r)]
+    hazards = [saw_swing(pcx, FLOOR_TOP - r + 2, pcx, beam_top + 10,
+                         arc, period, r)]
     dotted(hazards, pcx - 40, 200, 80, 8, 0)
     scx = cx0 + cw - 110
-    hazards.append(saw_path(scx, 468, scx, g(kk, [348, 358], salt=salt + 3),
+    dx = g(kk, [60, 80, -60, -80], salt=salt + 3)
+    hazards.append(saw_path(scx, 470, scx + dx, 470,
                             g(kk, [3.0, 3.4], salt=salt + 3),
                             g(kk, [28, 30], salt=salt + 3)))
     hazards.append(spikes_up(200 + (kk % 3) * 40,
@@ -1657,8 +3047,13 @@ def b_timed_corridors(c, kk, salt):
     ph = g(kk, [104, 116], salt=salt + 1)
     py = g(kk, [130, 150], salt=salt + 1)
     plats = [floor_seg(c, 0, 1280),
-             plat(cx0, 300, px - 30 - cx0, 20, "solid"),
-             plat(px + pw + 30, 300, cx0 + cw - (px + pw + 30), 20, "solid")]
+             # Full-width ceiling beam on edge walls (rule 7: gapped
+             # floating ceilings cannot be supported without blocking
+             # the corridor). The periodic pillar is housed in the
+             # beam: its home rect overlaps the beam's y-range.
+             plat(48, 150, 1184, 20, "solid"),
+             plat(0, 150, 48, 430, "solid"),
+             plat(1232, 150, 48, 430, "solid")]
     hazards = [pillar_periodic(
         px, py, pw, ph, g(kk, [3.8, 4.0, 4.4], salt=salt + 2),
         g(kk, [0.0, 0.5, 1.0], salt=salt + 2),
@@ -1705,14 +3100,17 @@ def b_column_forests(c, kk, salt):
         x += w + clear
     hazards = [column(x, h, w)
                for (x, w, h) in zip(xs, widths, heights)]
-    stal = [(40, 200), (60, 200), (40, 220), (60, 180), (80, 200)]
+    # Stalactites hang from one gantry beam (added by the grounding
+    # repair): a single beam height per level, tops >= 106 so the
+    # beam stays clear of the HUD band.
+    stal_y = g(kk, [110, 120, 130], salt=salt + 5)
     nstal = g(kk, [2, 3, 2, 3], salt=salt + 5)
     bases = [300, 600, 900]
     for j in range(nstal):
-        y, h = g(kk, stal, salt=salt + 5 + j)
+        h = g(kk, [160, 180, 200], salt=salt + 5 + j)
         hazards.append({"type": "spiked_column",
                         "x": int(bases[j] + sh(kk, 40, 3, salt=salt + j)),
-                        "y": int(y),
+                        "y": int(stal_y),
                         "w": int(g(kk, [48, 56, 64], salt=salt + 5 + j)),
                         "h": int(h)})
     spawn, door = flat_spawn_door(kk, salt)
@@ -1863,14 +3261,154 @@ EXTEND_SLOTS = [
     # (door, slot, first new variant). The first variant is verified
     # against the loaded candidates file (max existing + 1) at run
     # time; these values are the expected ones, never trusted blindly.
-    (21, 3, 3),
-    (34, 1, 3),
+    # Loop 2 (v3 recovery): the 22 Loop-1 failed slots. First-new
+    # variants follow candidates-v3.json (V3 for 2-variant slots,
+    # V4 for 3-variant slots, V3 for D37S4 which has only 2).
+    (9, 5, 3),
+    (11, 2, 3),
+    (18, 3, 3),
+    (18, 4, 3),
+    (18, 5, 3),
+    (19, 4, 3),
+    (27, 3, 3),
+    (31, 1, 4),
+    (31, 2, 4),
+    (31, 3, 4),
+    (31, 4, 4),
+    (31, 5, 4),
+    (37, 1, 4),
+    (37, 2, 4),
+    (37, 4, 3),
+    (39, 1, 4),
+    (39, 2, 4),
+    (39, 3, 4),
+    (39, 4, 4),
+    (39, 5, 4),
+    (40, 3, 3),
     (40, 5, 3),
-    (44, 2, 4),
-    (44, 3, 4),
-    (44, 4, 4),
 ]
 EXTEND_PER_SLOT = 3
+
+
+def _score_easiest(ctx, plats, hazards, spawn, door_pos):
+    """F2-pattern generic scorer for Loop-2 recovery slots: fewest
+    hazards, lowest speeds, widest gaps. Returns (score, fingerprint,
+    timing) for a raw builder draw; never filters (every draw is
+    scored; the checker + dedupe decide). Timing tuples hedge
+    phase-alignment failures via the diversity passes in extend_main.
+    Draws whose raw solid geometry already blocks the spawn point or
+    the door rect are rejected (None): the repair pass never removes
+    geometry, so they can never pass the checker (e.g. D37 door_x=1210
+    draws, whose builder edge wall overlaps the door rect).
+    """
+    for p in plats:
+        if p.get("kind") == "solid" and _blocks_spawn_door(
+                ctx, _pr(p), spawn, door_pos):
+            return None
+    lethal = [h for h in hazards if h.get("type") != "dotted_line"]
+    score = -70.0 * len(lethal)
+    timing = []
+    for h in lethal:
+        t = h.get("type")
+        if t == "saw":
+            r = float(h.get("r", 30))
+            score -= 6.0 * (r - 26.0)
+            if "path" in h and isinstance(h["path"], dict):
+                dx = float(h["path"].get("x2", h["x"])) - float(h["x"])
+                dy = float(h["path"].get("y2", h["y"])) - float(h["y"])
+                score -= 0.2 * math.hypot(dx, dy)
+            if "swing" in h and isinstance(h["swing"], dict):
+                sw = h["swing"]
+                score -= 3.0 * float(sw.get("arc_deg", 0))
+                score += 35.0 * float(sw.get("period", 3.0))
+                timing.append(("swing", float(sw.get("period", 0)),
+                               float(sw.get("arc_deg", 0))))
+            elif "period" in h:
+                score += 35.0 * float(h["period"])
+                timing.append(("saw", float(h["period"])))
+        elif t == "spikes":
+            score -= 0.4 * float(h.get("w", 60))
+            if "period" in h:
+                score += 45.0 * (float(h["period"])
+                                 - float(h.get("on_time", 0)))
+                timing.append(("popup", float(h["period"]),
+                               float(h.get("phase", 0)),
+                               float(h.get("on_time", 0))))
+            if "trigger_x" in h:
+                lead = abs(float(h["x"]) - float(h["trigger_x"]))
+                margin = lead / max(float(ctx.run_speed), 1.0) \
+                    - float(h.get("delay", 0))
+                score += 120.0 * margin + 60.0 * float(h.get("delay", 0))
+                timing.append(("trig", int(lead),
+                               float(h.get("delay", 0))))
+        elif t == "spiked_column":
+            score -= 1.5 * float(h.get("h", 60)) \
+                + 0.5 * float(h.get("w", 48))
+        elif t == "hanging_pillar":
+            if "period" in h:
+                score += 40.0 * float(h["period"])
+                score -= 0.02 * float(h.get("drop_speed", 700))
+                timing.append(("pillar", float(h["period"]),
+                               float(h.get("phase", 0)),
+                               float(h.get("drop_speed", 0))))
+    for p in plats:
+        k = p.get("kind")
+        if k == "dashed":
+            score += 50.0 * float(p.get("on_time", 0)) \
+                + 15.0 * (float(p.get("period", 0))
+                          - float(p.get("on_time", 0))) \
+                + 1.5 * float(p.get("w", 0))
+            timing.append(("dashed", float(p.get("period", 0)),
+                           float(p.get("phase", 0)),
+                           float(p.get("on_time", 0))))
+        elif k in ("falling", "tilting"):
+            score += 120.0 * float(p.get("stand_time", 0)) \
+                + 1.5 * float(p.get("w", 0))
+            timing.append((k, float(p.get("stand_time", 0))))
+        elif k == "moving":
+            score += 25.0 * float(p.get("period", 0)) \
+                + 2.0 * float(p.get("w", 0))
+            timing.append(("moving", float(p.get("period", 0)),
+                           float(p.get("dx", 0)), float(p.get("dy", 0))))
+    # Widest floor-band gaps between consecutive hazards.
+    band = sorted(
+        [h for h in lethal
+         if float(h.get("y", 0)) < 500.0
+         and float(h.get("y", 0)) + float(h.get("h", 0)) > 400.0],
+        key=lambda h: float(h["x"]))
+    gaps = []
+    for a, b in zip(band, band[1:]):
+        gaps.append(float(b["x"]) - (float(a["x"]) + float(a["w"])))
+    if gaps:
+        score += 2.5 * min(200.0, min(gaps)) \
+            + 0.5 * min(200.0, sum(gaps) / len(gaps))
+    if band:
+        score += 0.3 * min(300.0, max(
+            0.0, float(band[0]["x"]) - float(spawn[0])))
+    # Widest same-band shaft gap between solids (drop-shaft width).
+    solids = sorted([p for p in plats if p.get("kind") == "solid"],
+                    key=lambda p: float(p["x"]))
+    shaft = 0.0
+    for a, b in zip(solids, solids[1:]):
+        yov = min(float(a["y"]) + float(a["h"]),
+                  float(b["y"]) + float(b["h"])) \
+            - max(float(a["y"]), float(b["y"]))
+        if yov >= 8.0:
+            shaft = max(shaft, float(b["x"])
+                        - (float(a["x"]) + float(a["w"])))
+    score += 0.3 * shaft
+    score += 0.2 * (150.0 - float(spawn[0]))
+
+    def _fp(obj):
+        return tuple(sorted(
+            (k, round(float(v), 3) if isinstance(v, (int, float))
+             else str(v)) for k, v in obj.items()))
+
+    fingerprint = (tuple(_fp(p) for p in plats),
+                   tuple(_fp(h) for h in hazards),
+                   int(spawn[0]), int(spawn[1]),
+                   int(door_pos[0]), int(door_pos[1]))
+    return score, fingerprint, tuple(timing)
 
 
 def _score_pit_bridges(ctx, plats, hazards, spawn, door_pos):
@@ -1968,6 +3506,14 @@ def _score_column_forests(ctx, plats, hazards, spawn, door_pos):
              + float(280 - max_bottom)
              + float(sum(64 - c["w"] for c in cols))
              + float(150 - spawn[0]))
+    # Density bias (Loop 2): draws with door_x <= 1170 keep the
+    # gantry (the right edge wall clears the door rect), so the
+    # stalactites hang from a full-width beam and the middle is
+    # dense; door_x=1210 draws lose the gantry to pedestals and land
+    # at 176-184px, the thinnest middles in the file. Reward the
+    # gantry path.
+    if door_pos[0] <= 1170:
+        score += 150.0
     fingerprint = (tuple((c["x"], c["w"], c["h"]) for c in cols),
                    tuple(sorted((s["x"], s["y"], s["w"], s["h"])
                                 for s in stal)),
@@ -2048,9 +3594,137 @@ def _score_final_mega(ctx, plats, hazards, spawn, door_pos):
     return score, fingerprint, timing
 
 
+def _score_ceiling_spikes(ctx, plats, hazards, spawn, door_pos):
+    """(score, fingerprint, timing) for a raw b_ceiling_spikes draw, or
+    None. Loop 5 recovery scorer for door 17 (previously unextendable:
+    no scorer entry). Easing levers: ONE ceiling strip instead of two
+    (the kk-parity second strip doubles the overhead threat); narrow
+    strips; HIGH strips (small y = more headroom under the teeth);
+    narrow floor strips; horizontal separation between ceiling and
+    floor strips (jumping a floor strip while a ceiling strip hangs
+    overhead is the hard interaction). All-static: no timing hedge.
+    """
+    downs = sorted([h for h in hazards if h.get("type") == "spikes"
+                    and h.get("dir") == "down"], key=lambda h: h["x"])
+    ups = sorted([h for h in hazards if h.get("type") == "spikes"
+                  and h.get("dir") == "up"], key=lambda h: h["x"])
+    if not downs:
+        return None
+    score = 400.0 * (2 - len(downs))
+    for h in downs:
+        score += 2.0 * (150.0 - float(h["w"])) \
+            + 3.0 * (312.0 - float(h["y"]))
+    for h in ups:
+        score += 1.0 * (100.0 - float(h["w"]))
+    seps = []
+    for d in downs:
+        for u in ups:
+            gap = max(float(u["x"]) - (float(d["x"]) + float(d["w"])),
+                      float(d["x"]) - (float(u["x"]) + float(u["w"])))
+            seps.append(gap)
+    if seps:
+        sep = max(-60.0, min(200.0, min(seps)))
+        score += 0.5 * sep
+    fingerprint = (tuple((h["x"], h["w"], h["y"]) for h in downs),
+                   tuple((h["x"], h["w"]) for h in ups),
+                   spawn[0], door_pos[0])
+    return score, fingerprint, ()
+
+
+def _score_ceiling_gauntlets(ctx, plats, hazards, spawn, door_pos):
+    """(score, fingerprint, timing) for a raw b_ceiling_gauntlets draw,
+    or None. Loop 5 recovery scorer for door 36 (previously
+    unextendable: no scorer entry). Easing levers: a slow,
+    long-period, small hanging pillar; narrow HIGH ceiling strips;
+    a floor pattern preferring jumpable strips over saws/columns,
+    with small saw radii and short narrow columns.
+    """
+    pillars = [h for h in hazards if h.get("type") == "hanging_pillar"]
+    downs = sorted([h for h in hazards if h.get("type") == "spikes"
+                    and h.get("dir") == "down"], key=lambda h: h["x"])
+    if len(pillars) != 1 or len(downs) != 2:
+        return None
+    p = pillars[0]
+    score = (60.0 * float(p["period"])
+             - 0.05 * float(p["drop_speed"])
+             + 2.0 * (60.0 - float(p["w"]))
+             + 1.0 * (116.0 - float(p["h"]))
+             + 1.0 * (150.0 - float(p["y"])))
+    for h in downs:
+        score += 2.0 * (150.0 - float(h["w"])) \
+            + 3.0 * (252.0 - float(h["y"]))
+    kinds = []
+    for h in hazards:
+        t = h.get("type")
+        if t == "spikes" and h.get("dir") == "up":
+            score += 30.0 + 1.0 * (100.0 - float(h["w"]))
+            kinds.append(("strip", h["x"], h["w"]))
+        elif t == "saw":
+            score -= 6.0 * (float(h.get("r", 30)) - 26.0)
+            kinds.append(("saw", h["x"], h.get("r", 30)))
+        elif t == "spiked_column":
+            score += 1.0 * (88.0 - float(h["h"])) \
+                + 1.0 * (56.0 - float(h["w"]))
+            kinds.append(("column", h["x"], h["w"], h["h"]))
+    fingerprint = (tuple((h["x"], h["w"], h["y"]) for h in downs),
+                   tuple(sorted(kinds)),
+                   p["x"], p["w"], p["h"],
+                   float(p["period"]), float(p.get("phase", 0.0)),
+                   p["drop_speed"], spawn[0], door_pos[0])
+    timing = (("pillar", float(p["period"]),
+               float(p.get("phase", 0.0)), p["drop_speed"]),)
+    return score, fingerprint, timing
+
+
+def _score_step_climbs_easy(ctx, plats, hazards, spawn, door_pos):
+    """(score, fingerprint, timing) for a raw b_step_climbs draw, or
+    None. Loop 5 NEW easier parameter set for door 19: the previous
+    two extend rounds used the generic _score_easiest, which ignores
+    step geometry entirely (hazard count is a constant 2, so it
+    ranked on strip widths alone) and picked variants that all died
+    with the same signature. This scorer ranks on the actual
+    difficulty: LOW step heights first, then wide step tops, narrow
+    spike strips, and wide clearances (landing room) between each
+    strip and the neighbouring steps. All-static: no timing hedge.
+    """
+    steps = sorted([p for p in plats if p.get("kind") == "solid"
+                    and float(p["y"]) < FLOOR_TOP
+                    and float(p["w"]) < ctx.width],
+                   key=lambda p: p["x"])
+    strips = sorted([h for h in hazards if h.get("type") == "spikes"
+                     and h.get("dir") == "up"], key=lambda h: h["x"])
+    if len(steps) != 3 or len(strips) != 2:
+        return None
+    score = 0.0
+    for s in steps:
+        score += 6.0 * (80.0 - float(FLOOR_TOP - s["y"])) \
+            + 0.5 * (float(s["w"]) - 100.0)
+    for j, h in enumerate(strips):
+        left = steps[j]
+        right = steps[j + 1]
+        lead = float(h["x"]) - (float(left["x"]) + float(left["w"]))
+        trail = float(right["x"]) - (float(h["x"]) + float(h["w"]))
+        score += 1.5 * (100.0 - float(h["w"])) \
+            + 0.5 * lead + 1.0 * trail
+    fingerprint = (tuple((s["x"], s["w"], s["y"]) for s in steps),
+                   tuple((h["x"], h["w"]) for h in strips),
+                   spawn[0], door_pos[0])
+    return score, fingerprint, ()
+
+
 EXTEND_SCORERS = {
+    9: _score_easiest,
+    11: _score_easiest,
+    17: _score_ceiling_spikes,
+    18: _score_easiest,
+    19: _score_step_climbs_easy,
     21: _score_pit_bridges,
+    27: _score_easiest,
+    31: _score_easiest,
     34: _score_trigger_pits,
+    36: _score_ceiling_gauntlets,
+    37: _score_easiest,
+    39: _score_easiest,
     40: _score_column_forests,
     44: _score_final_mega,
 }
@@ -2060,16 +3734,18 @@ def _finish_candidate(ctx, kk, salt, plats, hazards, spawn, door_pos):
     """Finish passes for one extend-mode draw.
 
     This DUPLICATES the finish block in main() (same functions, same
-    order, same salt offsets) so main() itself stays untouched. Returns
-    (platforms, hazards) or None when the draw fails the upper-band /
-    lethal-hazard requirements.
+    order, same salt offsets, including core-middle dressing) so
+    main() itself stays untouched. Returns (platforms, hazards) or
+    None when the draw fails the upper-band / lethal-hazard
+    requirements.
     """
     plats = [dict(p) for p in plats]
     hazards = [dict(h) for h in hazards]
     normalize_ground(ctx, plats)
     low = route_is_low(ctx, plats, spawn, door_pos)
     if low:
-        add_skyline_dressing(ctx, kk, salt + 50, plats, hazards)
+        add_skyline_dressing(ctx, kk, salt + 50, plats, hazards,
+                             spawn, door_pos)
         if not has_upper_band(plats, hazards, spawn):
             add_ceiling_strip(ctx, kk, salt + 60, plats, hazards)
     if not has_upper_band(plats, hazards, spawn):
@@ -2079,6 +3755,9 @@ def _finish_candidate(ctx, kk, salt, plats, hazards, spawn, door_pos):
             pass
         else:
             return None
+    repair_grounding(ctx, plats, hazards, spawn, door_pos)
+    add_core_middle_dressing(ctx, kk, salt + 80, plats, hazards,
+                             spawn, door_pos)
     return plats, hazards
 
 
@@ -2129,7 +3808,14 @@ def extend_main(args):
         return 2
     existing_sigs = []
     for i, lv in enumerate(existing_levels):
-        chk = check_levels.LevelCheck(lv, i, tun).run()
+        # Legacy entries are verified WITHOUT the rule-5 connectivity
+        # check (Loop 2): 30 D31/D39 entries in candidates-v3.json are
+        # sealed pockets that predate the connectivity rule. They are
+        # preserved byte-identical (never picked: the autopilot fails
+        # them); only NEW picks must pass connectivity. Every other
+        # rule is still enforced here.
+        chk = check_levels.LevelCheck(lv, i, tun).run(
+            with_connectivity=False)
         if chk.errors:
             print("ERROR: existing candidate %s fails the checker: %s"
                   % (lv.get("id"), "; ".join(chk.errors[:2])),
@@ -2152,7 +3838,16 @@ def extend_main(args):
     new_levels = []
     new_sigs = []
     n_base = len(existing_levels)
-    for (door, slot, first_variant) in EXTEND_SLOTS:
+    extend_slots = EXTEND_SLOTS
+    if getattr(args, "extend_slots", None):
+        extend_slots = []
+        for part in args.extend_slots.split(","):
+            door_s, slot_s = part.strip().split(":")
+            door_i, slot_i = int(door_s), int(slot_s)
+            extend_slots.append(
+                (door_i, slot_i,
+                 max_variant.get((door_i, slot_i), 0) + 1))
+    for (door, slot, first_variant) in extend_slots:
         name, fn, _nv = table[door]
         expect = max_variant.get((door, slot), 0) + 1
         if expect != first_variant:
@@ -2221,6 +3916,10 @@ def extend_main(args):
                 plats2, hazards2 = finished
                 cid = "D%02dS%dV%d" % (door, slot,
                                        first_variant + len(picked))
+                decos = []
+                if DECO_PASS_ENABLED:
+                    decos = add_decorations(ctx, kk, salt + 90, plats2,
+                                            hazards2, spawn, door_pos)
                 level = {"id": cid, "palette": door - 1,
                          "spawn": {"x": int(spawn[0]),
                                    "y": int(spawn[1])},
@@ -2228,6 +3927,8 @@ def extend_main(args):
                                   "y": int(door_pos[1])},
                          "platforms": plats2, "hazards": hazards2,
                          "template": name, "variation": cid}
+                if decos:
+                    level["decorations"] = decos
                 if not has_lethal_hazard(hazards2):
                     n_invalid += 1
                     continue
@@ -2333,6 +4034,10 @@ def main(argv=None):
     ap.add_argument("--shortlist", type=int, default=400,
                     help="top-scored draws per slot put through the "
                     "checker in --extend mode")
+    ap.add_argument("--extend-slots", default=None,
+                    help="comma-separated door:slot pairs for --extend "
+                    "mode (default: the EXTEND_SLOTS table); first new "
+                    "variant is always max-existing + 1")
     args = ap.parse_args(argv)
     if args.extend:
         return extend_main(args)
@@ -2380,6 +4085,7 @@ def main(argv=None):
     n_duplicates = 0
     n_invalid = 0
     n_retried = 0
+    n_attempts = 0
     dup_examples = []
     invalid_examples = []
     per_door = {}
@@ -2397,6 +4103,7 @@ def main(argv=None):
             # Attempt stride 5 is coprime to the pick-list lengths
             # (2..6), so retries actually vary; attempt 0 is unchanged.
             kk = k * MAX_ATTEMPTS + attempt * 5
+            n_attempts += 1
             try:
                 plats, hazards, spawn, door_pos = fn(ctx, kk, salt)
             except Exception as exc:  # builder bug: record, never crash
@@ -2411,7 +4118,8 @@ def main(argv=None):
             normalize_ground(ctx, plats)
             low = route_is_low(ctx, plats, spawn, door_pos)
             if low:
-                add_skyline_dressing(ctx, kk, salt + 50, plats, hazards)
+                add_skyline_dressing(ctx, kk, salt + 50, plats, hazards,
+                                     spawn, door_pos)
                 if not has_upper_band(plats, hazards, spawn):
                     add_ceiling_strip(ctx, kk, salt + 60, plats, hazards)
             if not has_upper_band(plats, hazards, spawn):
@@ -2426,11 +4134,20 @@ def main(argv=None):
                     fail_kind, fail_detail = "invalid", \
                         "no lethal hazard (empty hazards banned)"
                     continue
+            repair_grounding(ctx, plats, hazards, spawn, door_pos)
+            add_core_middle_dressing(ctx, kk, salt + 80, plats, hazards,
+                                     spawn, door_pos)
+            decos = []
+            if DECO_PASS_ENABLED:
+                decos = add_decorations(ctx, kk, salt + 90, plats,
+                                        hazards, spawn, door_pos)
             level = {"id": cid, "palette": door - 1,
                      "spawn": {"x": int(spawn[0]), "y": int(spawn[1])},
                      "door": {"x": int(door_pos[0]), "y": int(door_pos[1])},
                      "platforms": plats, "hazards": hazards,
                      "template": name, "variation": cid}
+            if decos:
+                level["decorations"] = decos
             chk = check_levels.LevelCheck(level, len(accepted), tun).run()
             if chk.errors:
                 fail_kind, fail_detail = "invalid", \
@@ -2481,6 +4198,7 @@ def main(argv=None):
     if not args.quiet:
         print("generate_levels.py (Run 2): seed=%d" % args.seed)
         print("  candidates requested: %d" % len(requested))
+        print("  draws scanned:        %d" % n_attempts)
         print("  duplicates rejected:  %d" % n_duplicates)
         print("  invalid rejected:     %d" % n_invalid)
         print("  accepted via retry:   %d" % n_retried)

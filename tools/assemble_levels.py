@@ -1,29 +1,32 @@
 #!/usr/bin/env python3
-"""Trap Tower level assembler (Run 2).
+"""Trap Tower level assembler (Run 3, LEVEL_SCHEMA.md v2).
 
 Joins a candidates file with an autopilot report by candidate ID and
-writes the shipped levels.json. Frozen assembly contract (run-ledger.md
-Run 2, reconciled plan v1):
+writes the shipped levels.json. Frozen assembly contract (v2 flat
+structure):
 
-- Candidate IDs ``D{door:02d}S{slot}V{variant}`` (e.g. D03S2V1); the
-  ``variation`` field holds the same code.
-- Selects the FIRST passing variant PER (door, slot), variants ordered
-  by variant number ascending. A pass requires ``pass == true`` AND
-  ``mode == "game"`` in the autopilot report.
-- A door ships iff ALL 5 slots pass; incomplete doors are dropped
-  entirely.
-- Shipped order = door-major, slot order. Shipped IDs are reassigned
-  L001.. sequentially. Palette = door_index (0-based, from the
-  candidate door number, NOT the shipped position).
+- Candidate IDs ``D{archetype:02d}S{slot}V{variant}`` (e.g. D03S2V1);
+  the ``variation`` field holds the same code.
+- Selects the FIRST passing variant PER (archetype, slot), variants
+  ordered by variant number ascending. A pass requires ``pass == true``
+  AND ``mode == "game"`` in the autopilot report.
+- NO whole-door drop rule: incomplete archetypes contribute only
+  their passing slots.
+- Archetypes 1-43 ship first; if the total is below 215, top up from
+  spare archetype D44's passing slots in slot order, up to 215.
+- FAIL LOUDLY (exit non-zero) if the total is below 200.
+- Shipped order = archetype-major, slot order, spares last. Shipped
+  IDs are reassigned L001.. sequentially. Palette = archetype-1
+  (D44 -> 43).
 - Asserts geometry identity: shipped geometry == candidate geometry
   except id/palette.
-- Writes a mapping report (candidate -> final ID, palette per door,
-  input/output shas).
+- Writes a mapping report (candidate -> final ID, palette per
+  archetype, picks + spares + counts, input/output shas).
 - Deterministic. Refuses to write on ANY inconsistency: report sha
   mismatch, unknown report IDs, candidates missing from the report,
-  duplicate candidate IDs, duplicate final IDs, non-multiple-of-5
-  shipped counts, unparseable IDs, variation/ID mismatch, palette out
-  of range, or a geometry-identity failure.
+  duplicate candidate IDs, duplicate final IDs, fewer than 200
+  shippable levels, unparseable IDs, variation/ID mismatch, palette
+  out of range, or a geometry-identity failure.
 
 Usage:
   python3 tools/assemble_levels.py --candidates <candidates.json>
@@ -42,7 +45,10 @@ from pathlib import Path
 
 ID_RE = re.compile(r"^D(\d{2})S([1-5])V(\d+)$")
 SLOTS_PER_DOOR = 5
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+SPARE_DOOR = 44
+TARGET_SHIPPED = 215
+MIN_SHIPPED = 200
 
 
 def fail(msg):
@@ -160,74 +166,88 @@ def main(argv=None):
                     "(run the autopilot on the whole candidates file)"
                     % (len(missing), ", ".join(missing[:10])))
 
-    # --- Select first passing variant per (door, slot) ----------------
+    # --- Select first passing variant per (archetype, slot) ------------
+    # v2 flat structure: incomplete archetypes contribute only their
+    # passing slots (no whole-door drop). D44 is the spare archetype:
+    # its passing slots top the shipment up to 215, in slot order.
     grouped = {}      # (door, slot) -> [(variant, id)]
     for lid, (door, slot, variant) in parsed.items():
         grouped.setdefault((door, slot), []).append((variant, lid))
     for key in grouped:
         grouped[key].sort()
 
-    doors = sorted({door for (door, _slot) in grouped})
-    selected = {}     # (door, slot) -> id
-    dropped_doors = {}  # door -> [failed slots]
-    for door in doors:
-        failed_slots = []
+    def first_passing(door, slot):
+        for _variant, lid in grouped.get((door, slot), []):
+            passed, mode = verdicts[lid]
+            if passed and mode == "game":
+                return lid
+        return None
+
+    selected = {}     # (door, slot) -> id  (archetypes 1..43 only)
+    failed_slots = {}  # door -> [failed slots]
+    for door in sorted({d for (d, _slot) in grouped if d != SPARE_DOOR}):
         for slot in range(1, SLOTS_PER_DOOR + 1):
-            picked = None
-            for _variant, lid in grouped.get((door, slot), []):
-                passed, mode = verdicts[lid]
-                if passed and mode == "game":
-                    picked = lid
-                    break
+            picked = first_passing(door, slot)
             if picked is None:
-                failed_slots.append(slot)
+                failed_slots.setdefault(door, []).append(slot)
             else:
                 selected[(door, slot)] = picked
-        if failed_slots:
-            dropped_doors[door] = failed_slots
-            for slot in range(1, SLOTS_PER_DOOR + 1):
-                selected.pop((door, slot), None)
 
-    shipped_doors = [d for d in doors if d not in dropped_doors]
-    if not shipped_doors:
-        return fail("no complete door: every door is missing a passing "
-                    "variant for at least one slot; nothing to ship")
+    spares = []       # [(slot, id)] from D44, slot order
+    for slot in range(1, SLOTS_PER_DOOR + 1):
+        picked = first_passing(SPARE_DOOR, slot)
+        if picked is not None:
+            spares.append((slot, picked))
+    n_spares_available = len(spares)
+    spare_picks = []  # [(slot, id)] actually used
+    while len(selected) + len(spare_picks) < TARGET_SHIPPED and spares:
+        spare_picks.append(spares.pop(0))
+    total = len(selected) + len(spare_picks)
+    if total < MIN_SHIPPED:
+        return fail("only %d shippable levels (%d archetype picks + %d "
+                    "spare picks) < minimum %d; refusing to ship"
+                    % (total, len(selected), len(spare_picks), MIN_SHIPPED))
 
     # --- Build shipped levels (ID + palette reassignment only) --------
+    # Order: archetype-major, slot order, spares last.
+    picks = []        # (door, slot, id, is_spare)
+    for door in sorted({d for (d, _s) in selected}):
+        for slot in range(1, SLOTS_PER_DOOR + 1):
+            lid = selected.get((door, slot))
+            if lid is not None:
+                picks.append((door, slot, lid, False))
+    for slot, lid in spare_picks:
+        picks.append((SPARE_DOOR, slot, lid, True))
     shipped = []
     mapping = []
     seq = 0
-    for door in shipped_doors:
-        for slot in range(1, SLOTS_PER_DOOR + 1):
-            lid = selected[(door, slot)]
-            seq += 1
-            final_id = "L%03d" % seq
-            cand = candidates[lid]
-            out_level = dict(cand)
-            out_level["id"] = final_id
-            out_level["palette"] = door - 1
-            # Geometry identity: everything except id/palette identical.
-            for key, value in cand.items():
-                if key in ("id", "palette"):
-                    continue
-                if out_level[key] != value:
-                    return fail("geometry identity failure for %s -> %s "
-                                "(field %r changed)" % (lid, final_id, key))
-            if set(out_level) != set(cand):
+    for door, slot, lid, is_spare in picks:
+        seq += 1
+        final_id = "L%03d" % seq
+        cand = candidates[lid]
+        out_level = dict(cand)
+        out_level["id"] = final_id
+        out_level["palette"] = door - 1
+        # Geometry identity: everything except id/palette identical.
+        for key, value in cand.items():
+            if key in ("id", "palette"):
+                continue
+            if out_level[key] != value:
                 return fail("geometry identity failure for %s -> %s "
-                            "(field set changed)" % (lid, final_id))
-            shipped.append(out_level)
-            mapping.append({"candidate_id": lid, "final_id": final_id,
-                            "door": door, "slot": slot,
-                            "variant": parsed[lid][2],
-                            "template": cand["template"],
-                            "palette": door - 1})
+                            "(field %r changed)" % (lid, final_id, key))
+        if set(out_level) != set(cand):
+            return fail("geometry identity failure for %s -> %s "
+                        "(field set changed)" % (lid, final_id))
+        shipped.append(out_level)
+        mapping.append({"candidate_id": lid, "final_id": final_id,
+                        "door": door, "slot": slot,
+                        "variant": parsed[lid][2],
+                        "template": cand["template"],
+                        "palette": door - 1,
+                        "spare": is_spare})
     final_ids = [lv["id"] for lv in shipped]
     if len(set(final_ids)) != len(final_ids):
         return fail("duplicate final IDs after reassignment (internal error)")
-    if len(shipped) % SLOTS_PER_DOOR != 0:
-        return fail("shipped count %d is not a multiple of %d"
-                    % (len(shipped), SLOTS_PER_DOOR))
 
     out_data = {"schema_version": SCHEMA_VERSION,
                 "tuning_version": tuning["tuning_version"],
@@ -235,6 +255,10 @@ def main(argv=None):
     out_text = json.dumps(out_data, indent=1, sort_keys=True) + "\n"
     out_sha = sha256_bytes(out_text.encode("utf-8"))
 
+    shipped_doors = sorted({d for (d, _s) in selected})
+    palette_doors = set(shipped_doors)
+    if spare_picks:
+        palette_doors.add(SPARE_DOOR)
     mapping_data = {
         "candidates_path": str(cand_path),
         "candidates_sha256": cand_sha,
@@ -244,11 +268,18 @@ def main(argv=None):
         "tuning_path": str(tuning_path),
         "output_path": str(out_path),
         "output_sha256": out_sha,
-        "doors_shipped": shipped_doors,
-        "doors_dropped": {str(d): slots
-                          for d, slots in sorted(dropped_doors.items())},
-        "palette_per_door": {str(d): d - 1 for d in shipped_doors},
+        "archetypes_shipped": shipped_doors,
+        "failed_slots": {str(d): slots
+                         for d, slots in sorted(failed_slots.items())},
+        "archetype_picks": len(selected),
+        "spares_available": n_spares_available,
+        "spare_picks": [{"candidate_id": lid, "slot": slot}
+                        for slot, lid in spare_picks],
+        "spare_picks_count": len(spare_picks),
+        "palette_per_door": {str(d): d - 1 for d in sorted(palette_doors)},
         "shipped_count": len(shipped),
+        "target_count": TARGET_SHIPPED,
+        "minimum_count": MIN_SHIPPED,
         "mapping": mapping,
     }
     mapping_text = json.dumps(mapping_data, indent=1, sort_keys=True) + "\n"
@@ -260,19 +291,23 @@ def main(argv=None):
 
     if not args.quiet:
         print("assemble_levels.py: %d candidates -> %d shipped "
-              "(%d doors)" % (len(levels), len(shipped), len(shipped_doors)))
-        print("  doors shipped: %s"
+              "(%d archetype picks + %d spares)"
+              % (len(levels), len(shipped), len(selected), len(spare_picks)))
+        print("  archetypes with picks: %s"
               % ", ".join("D%02d" % d for d in shipped_doors))
-        if dropped_doors:
-            print("  doors dropped (incomplete): %s"
+        if failed_slots:
+            print("  failed slots (no passing variant): %s"
                   % ", ".join("D%02d slots %s" % (d, slots)
-                              for d, slots in sorted(dropped_doors.items())))
+                              for d, slots in sorted(failed_slots.items())))
+        if spare_picks:
+            print("  spares used (D44, slot order): %s"
+                  % ", ".join(lid for _slot, lid in spare_picks))
         print("  output: %s (sha256 %s)" % (out_path, out_sha))
         print("  mapping: %s" % mapping_path)
-        if len(shipped_doors) < 40:
-            print("  WARNING: only %d complete doors (< 40-door minimum); "
-                  "verification must judge the count"
-                  % len(shipped_doors), file=sys.stderr)
+        if len(shipped) < TARGET_SHIPPED:
+            print("  WARNING: shipped %d < target %d; verification must "
+                  "judge the count" % (len(shipped), TARGET_SHIPPED),
+                  file=sys.stderr)
     return 0
 
 

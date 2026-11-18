@@ -259,6 +259,11 @@ func _draw_saw() -> void:
 	# The whole disc is drawn; z_index 10 keeps it above floor platforms.
 	# Centre, radius and hitbox are unchanged.
 	var c := saw_centre_now()
+	# Swing saws only: a chain from the pivot to the disc centre, so
+	# the mount is visible. Drawn before the disc; static/path saws
+	# are unchanged. Drawing only.
+	if has_swing:
+		draw_line(swing_pivot, c, trap_col, 3.0)
 	var teeth := 18
 	var pts := PackedVector2Array()
 	for i in range(teeth * 2):
@@ -283,7 +288,9 @@ func _draw_pillar() -> void:
 	var top := pillar_home.y + pillar_offset
 	var cx := pillar_home.x + rect.size.x * 0.5
 	if pillar_hanging:
-		draw_line(Vector2(cx, 0), Vector2(cx, top), trap_col, 3.0)
+		# Cable from the HUD band edge (y=90), not from y=0, so no
+		# drawn pixel enters the HUD band. Drawing only.
+		draw_line(Vector2(cx, 90), Vector2(cx, top), trap_col, 3.0)
 	draw_rect(Rect2(pillar_home.x, top, rect.size.x, rect.size.y), trap_col)
 
 

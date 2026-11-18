@@ -1750,8 +1750,8 @@ func _run() -> void:
 		return
 	# Fail fast on version mismatch, exactly as the runtime must
 	# (LEVEL_SCHEMA.md: never silently load mismatched data).
-	if int((data as Dictionary).get("schema_version", -1)) != 1:
-		_die("schema_version %s != frozen 1 in %s" % [
+	if int((data as Dictionary).get("schema_version", -1)) != 2:
+		_die("schema_version %s != frozen 2 in %s" % [
 				str((data as Dictionary).get("schema_version")),
 				levels_path], 2)
 		return

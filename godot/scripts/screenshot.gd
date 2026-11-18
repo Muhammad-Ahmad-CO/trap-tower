@@ -1,27 +1,31 @@
 extends Node
 
 # Screenshot capture ONLY: renders REAL frames through the real
-# map/game scenes and real UI paths (picker, settings, pause, death,
+# map/game scenes and real UI paths (settings, pause, death,
 # skip). Never draws mockups. No gameplay code is touched.
 # Run under Xvfb with a real rendering driver (NOT --headless):
 #   xvfb-run -a <godot> --path <project> res://scenes/screenshot.tscn -- \
 #     --shot-levels L001,L006,L011 --shot-out <dir>
-# Defaults: first stage of doors 1, 2, 3 + 3 more distinct doors,
-# selected by door from the shipped file; out dir
-# $HOME/workspace/trap-tower/verification/shots. Always captures:
+# Defaults: the explicit flat list in _default_level_ids() (first
+# level of each archetype group + extras + dark-palette halo shots);
+# out dir $HOME/workspace/trap-tower/verification/shots. Always captures:
 # map.png (fresh progress), map_progress.png (mid-progress fixture),
-# picker.png (picker via open_picker), settings.png (settings via
-# open_settings), pause.png (pause overlay via the real pause path),
-# death.png (REAL hazard death, captured inside the dead state),
-# skip.png (3 REAL deaths, then Skip visible), level_<ID>.png for each
-# selected level, plus ONE level at a second trap phase
-# (level_<ID>_phase2.png, longer settle).
-# Progress fixtures are written to user://progress.cfg (save_version 2)
+# map_scrolled.png (same mid-progress map, scrolled to max),
+# settings.png (settings via open_settings), pause.png (pause overlay
+# via the real pause path), death.png (REAL hazard death, captured
+# inside the dead state), skip.png (3 REAL deaths, then Skip visible),
+# level_<ID>.png for each selected level, plus phase-2 pairs
+# (level_<ID>_phase2.png at 2.6s vs the 1.0s shot) for L098, L036,
+# L056 and L031, each gated on a pixel diff > 0 (a 0-diff pair is
+# INVALID — it proves no second trap phase, the v2 L001 lesson).
+# There is NO picker in v3: no picker.png is captured.
+# Progress fixtures are written to user://progress.cfg (save_version 3)
 # before map captures; a FRESH empty progress is restored at the end.
 
 var _out_dir := ""
 var _level_ids: Array[String] = []
 var _levels: Array = []
+var _phase_gate_failed := false
 
 
 func _ready() -> void:
@@ -68,11 +72,11 @@ func _run() -> void:
 			var id := part.strip_edges()
 			if id != "":
 				_level_ids.append(id)
-		for id in _level_ids:
-			if not index_by_id.has(id):
-				print("SHOT ERROR: unknown level id ", id)
-				get_tree().quit(1)
-				return
+	for id in _level_ids:
+		if not index_by_id.has(id):
+			print("SHOT ERROR: unknown level id ", id)
+			get_tree().quit(1)
+			return
 	print("SHOT viewport=", get_viewport().get_visible_rect().size, " out=", _out_dir, " levels=", _level_ids)
 
 	var map_scene: PackedScene = load("res://scenes/map.tscn")
@@ -85,20 +89,24 @@ func _run() -> void:
 	await _settle_and_capture(_out_dir + "/map.png", 0.5)
 	await _remove(map_inst)
 
-	# Map, mid-progress fixture + picker + settings on one instance.
+	# Map, mid-progress fixture (completed ids consistent with
+	# highest: ids up to `mid`, not a mismatched count) + scrolled
+	# map + settings on one instance. No picker exists in v3.
 	var mid := _levels.size() / 2
 	var done_ids: Array[String] = []
-	for k in range(mini(42, _levels.size())):
+	for k in range(mini(mid, _levels.size())):
 		done_ids.append(str(_levels[k].get("id", "")))
 	_write_progress(mid, done_ids)
 	map_inst = map_scene.instantiate()
 	add_child(map_inst)
 	await _settle_and_capture(_out_dir + "/map_progress.png", 0.6)
-	var doors := (_levels.size() + 4) / 5
-	var picker_door := mini(8, doors - 1)
-	map_inst.call("open_picker", picker_door)
-	await _capture_now(_out_dir + "/picker.png")
-	map_inst.call("close_picker")
+	var scroll: ScrollContainer = map_inst.get("_scroll")
+	if scroll != null:
+		scroll.scroll_vertical = 100000.0
+		await get_tree().process_frame
+		await get_tree().process_frame
+		await get_tree().process_frame
+	await _capture_now(_out_dir + "/map_scrolled.png")
 	map_inst.call("open_settings")
 	await _capture_now(_out_dir + "/settings.png")
 	map_inst.call("close_settings")
@@ -144,40 +152,97 @@ func _run() -> void:
 		await _settle_and_capture(_out_dir + "/level_" + id + ".png", 1.0)
 		await _remove(game_inst)
 
-	# One level at a second trap phase (different settle time).
-	TTState.level_index = int(index_by_id[_level_ids[0]])
-	game_inst = game_scene.instantiate()
-	add_child(game_inst)
-	await _settle_and_capture(_out_dir + "/level_" + _level_ids[0] + "_phase2.png", 2.6)
-	await _remove(game_inst)
+	# Phase-2 pairs (Loop 4, derived from the NEW assembly mapping +
+	# runtime timing code; one per timed archetype). First capture
+	# 1.0s; second capture at the per-pair time below. A 0-diff pair
+	# is INVALID.
+	# L056 D12S1V1 dashed: both dashed solid at 1.0s; at 3.3s both
+	#   OFF (fposmod(3.3-0.5,3.2)=2.8>=2.2; fposmod(3.3-1.0,3.0)=2.3>=2.0).
+	# L031 D07S1V1 periodic pillar: home (offset 0) at 1.0s; at 4.5s
+	#   offset 253.8px (cycle 3.5; hang 2.997 + drop 0.403, rising).
+	# L071 D15S1V1 mover: sine f=0.933 at 1.0s vs 0.067 at 2.6s
+	#   (period 2.4, dx 70 -> ~61px apart).
+	# L036 D08S1V1 swing saw: angle +5.77deg at 1.0s vs -5.97deg at
+	#   2.6s (arc 12deg, period 3.4).
+	var phase_pairs: Array = [["L056", 3.3], ["L031", 4.5], ["L071", 2.6], ["L036", 2.6]]
+	for pair in phase_pairs:
+		var pair_id: String = pair[0]
+		var pair_t2: float = pair[1]
+		if not index_by_id.has(pair_id):
+			print("SHOT PHASEDIFF ERROR: unknown level id ", pair_id)
+			_phase_gate_failed = true
+			continue
+		TTState.level_index = int(index_by_id[pair_id])
+		game_inst = game_scene.instantiate()
+		add_child(game_inst)
+		await _settle_and_capture(_out_dir + "/level_" + pair_id + ".png", 1.0)
+		await _remove(game_inst)
+		TTState.level_index = int(index_by_id[pair_id])
+		game_inst = game_scene.instantiate()
+		add_child(game_inst)
+		await _settle_and_capture(_out_dir + "/level_" + pair_id + "_phase2.png", pair_t2)
+		await _remove(game_inst)
+		var diff := _pixel_diff(_out_dir + "/level_" + pair_id + ".png",
+			_out_dir + "/level_" + pair_id + "_phase2.png")
+		print("SHOT PHASEDIFF ", pair_id, " diff_pixels=", diff)
+		if diff <= 0:
+			_phase_gate_failed = true
+			print("SHOT PHASEDIFF INVALID: ", pair_id, " pair is pixel-identical (no second trap phase proven)")
 
 	# Restore a FRESH empty progress at the end.
 	_write_progress(0, [])
+	if _phase_gate_failed:
+		print("SHOT PHASEDIFF GATE FAILED: at least one phase pair is invalid; captures are saved, fresh progress restored")
+		get_tree().quit(1)
+		return
 	print("SHOT DONE")
 	get_tree().quit(0)
 
 
 func _default_level_ids() -> Array[String]:
-	# First stage of doors 1, 2, 3 + 3 more distinct doors spread
-	# across the file. Door d's first stage is index d*5.
-	var doors := (_levels.size() + 4) / 5
-	var picks: Array[int] = []
-	for d in [0, 1, 2]:
-		if d < doors and not picks.has(d):
-			picks.append(d)
-	for frac in [0.25, 0.5, 0.98]:
-		var d2 := int(float(doors) * frac)
-		if d2 < doors and not picks.has(d2):
-			picks.append(d2)
-	var d3 := 3
-	while picks.size() < 6 and d3 < doors:
-		if not picks.has(d3):
-			picks.append(d3)
-		d3 += 1
+	# EXPLICIT flat list (v3, no doors): first level of each
+	# archetype group (5-level groups, first = index 0,5,10,...),
+	# PLUS extras L003, L008, L013, PLUS dark-palette halo shots
+	# L061, L101, L151, L176, L201 (several already in the flat
+	# list; duplicates removed, order kept).
+	var explicit: Array[String] = ["L001", "L006", "L011", "L016", "L021",
+		"L026", "L031", "L036", "L041", "L046", "L051", "L056", "L061",
+		"L066", "L071", "L076", "L081", "L086", "L091", "L096", "L101",
+		"L106", "L111", "L116", "L121", "L126", "L131", "L136", "L141",
+		"L146", "L151", "L156", "L161", "L166", "L171", "L176", "L181",
+		"L186", "L191", "L196", "L201", "L206", "L211",
+		"L003", "L008", "L013",
+		"L061", "L101", "L151", "L176", "L201"]
 	var ids: Array[String] = []
-	for d in picks:
-		ids.append(str(_levels[d * 5].get("id", "")))
+	for id in explicit:
+		if not ids.has(id):
+			ids.append(id)
 	return ids
+
+
+func _pixel_diff(path_a: String, path_b: String) -> int:
+	var a := Image.load_from_file(path_a)
+	var b := Image.load_from_file(path_b)
+	if a == null or b == null:
+		print("SHOT PHASEDIFF ERROR: could not load pair images")
+		return -1
+	if a.get_size() != b.get_size():
+		print("SHOT PHASEDIFF ERROR: pair image sizes differ")
+		return -1
+	if a.get_format() != b.get_format():
+		a.convert(Image.FORMAT_RGBA8)
+		b.convert(Image.FORMAT_RGBA8)
+	var da := a.get_data()
+	var db := b.get_data()
+	if da.size() != db.size():
+		return -1
+	var diff := 0
+	var px := 0
+	while px < da.size():
+		if da[px] != db[px] or da[px + 1] != db[px + 1] or da[px + 2] != db[px + 2] or da[px + 3] != db[px + 3]:
+			diff += 1
+		px += 4
+	return diff
 
 
 func _find_death_level() -> int:

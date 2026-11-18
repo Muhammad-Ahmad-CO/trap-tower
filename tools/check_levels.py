@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Trap Tower static level verifier (Lane B).
 
-Implements LEVEL_SCHEMA.md v1 (FROZEN) exactly. Loads
+Implements LEVEL_SCHEMA.md v2 (FROZEN) exactly. Loads
 godot/data/levels.json + godot/data/tuning.json and checks:
 
   (a) schema/tuning versions, required fields, unknown kind/type = hard error
@@ -9,7 +9,10 @@ godot/data/levels.json + godot/data/tuning.json and checks:
   (c) spawn/door safe zones (40px) + standing on solid ground
   (d) platform-graph reachability from spawn to door using the FROZEN
       harness envelope from tuning.json (rise/gap/landing/run-up),
-      with per-edge reasoning; conservative pre-filter only
+      with per-edge reasoning; conservative pre-filter only. PLUS
+      connectivity: flood-fill of empty space (8px grid, 4-connected)
+      from spawn to door with solid platforms as walls -- the graph
+      alone cannot see solid walls sealing a route.
   (e) timed hazards on a viable path leave a safe window >= 0.7s
       (from declarative params; saw paths as swept volumes; falling
       floors must be crossable within stand_time)
@@ -17,6 +20,24 @@ godot/data/levels.json + godot/data/tuning.json and checks:
       are distinct only if signatures differ AND >= 2 of {layout
       geometry, trap set/params, solution path} differ; every
       duplicate cluster is reported.
+  (g) GROUNDING (rule 7): no floating geometry -- solid fixpoint,
+      shaft-flanked/resting specials, seated spikes, saw disc touch
+      over the full sweep, swing pivots inside grounded beams.
+      Rect hazards (spikes, spiked_column) must not area-overlap
+      solid rects beyond the 4px seating tolerance (saws,
+      hanging_pillar, dotted_line exempt).
+  (h) HUD KEEP-OUT (rule 8): no drawn extent in y < 90; spawn feet
+      y >= 134; door base y >= 174.
+  (i) DENSITY FLOOR (rule 9): >= 2 solid rects in the middle band
+      y 150..450 with combined width >= 160px, PLUS a core-middle
+      floor: excluding edge-touching rects, >= 2 rects (solid
+      platforms AND/OR decorations, counted together)
+      intersecting y 260..420 with combined width >= 160px.
+  (j) DECORATIONS (rule 10): the optional `decorations` array, if
+      present, must satisfy the attachment chain, HUD keep-out,
+      no-hazard/spawn/door-overlap, and bounds rules (error prefix
+      `deco:`). Decorations are ignored by reachability,
+      connectivity, and dedupe signatures.
 
 Physics/envelope/viewport/door/palette numbers are ALWAYS loaded from
 tuning.json -- never duplicated here by hand. The only numeric
@@ -30,6 +51,7 @@ Exit codes: 0 = all levels pass; 1 = one or more levels fail;
 Usage:
   python3 tools/check_levels.py [--levels PATH] [--tuning PATH]
                                 [--json-out PATH] [--quiet]
+                                [--density-report]
   python3 tools/check_levels.py --selftest   # fixture expectations
 """
 
@@ -38,13 +60,31 @@ import hashlib
 import json
 import math
 import sys
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path
 
 # --- Constants from LEVEL_SCHEMA.md (not in tuning.json) -------------------
-SCHEMA_VERSION = 1          # LEVEL_SCHEMA.md: top-level schema_version
+SCHEMA_VERSION = 2          # LEVEL_SCHEMA.md: top-level schema_version
 SAFE_ZONE = 40.0            # LEVEL_SCHEMA.md: spawn/door safe zone, px
 GROUND_TOL = 4.0            # LEVEL_SCHEMA.md: platform top within 4px
+HUD_KEEPOUT_Y = 90.0        # LEVEL_SCHEMA.md rule 8: no drawn extent y < 90
+SPAWN_MIN_Y = 134.0         # LEVEL_SCHEMA.md rule 8: spawn feet y >= 134
+DOOR_MIN_Y = 174.0          # LEVEL_SCHEMA.md rule 8: door base y >= 174
+MIN_PILLAR_W = 48.0         # LEVEL_SCHEMA.md rule 7: pillar w >= 48
+SHAFT_FLANK_GAP = 8.0       # LEVEL_SCHEMA.md rule 7: shaft columns <= 8px
+DENSITY_BAND_TOP = 150.0    # LEVEL_SCHEMA.md rule 9: middle band y 150..450
+DENSITY_BAND_BOTTOM = 450.0
+DENSITY_MIN_RECTS = 2       # LEVEL_SCHEMA.md rule 9: >= 2 solid rects
+DENSITY_MIN_WIDTH = 160.0   # LEVEL_SCHEMA.md rule 9: combined width >= 160
+CORE_BAND_TOP = 260.0       # LEVEL_SCHEMA.md rule 9: core-middle y 260..420
+CORE_BAND_BOTTOM = 420.0
+CORE_MIN_RECTS = 2          # LEVEL_SCHEMA.md rule 9: >= 2 non-edge rects
+CORE_MIN_WIDTH = 160.0      # LEVEL_SCHEMA.md rule 9: combined width >= 160
+OVERLAP_TOL = 4.0           # LEVEL_SCHEMA.md rule 7: seating tolerance
+DECO_MIN_W = 48.0           # LEVEL_SCHEMA.md Decorations: w >= 48
+DECO_MIN_H = 16.0           # LEVEL_SCHEMA.md Decorations: h >= 16
+DECO_ATTACH_TOL = 4.0       # LEVEL_SCHEMA.md rule 10: edge-adjacent
+                            # within 4px counts as attached
 MIN_PLATFORM_H = 16.0       # LEVEL_SCHEMA.md: platform h >= 16
 SAW_R_MIN, SAW_R_MAX = 26.0, 60.0   # LEVEL_SCHEMA.md: saw r 26..60
 DASHED_MIN_ON = 0.9         # LEVEL_SCHEMA.md: dashed on_time >= 0.9
@@ -54,6 +94,9 @@ MOVING_MIN_PERIOD = 1.6     # LEVEL_SCHEMA.md: moving/saw period >= 1.6
 MIN_DELAY = 0.25            # LEVEL_SCHEMA.md: trigger delay >= 0.25
 PILLAR_RISE_TIME = 1.0      # LEVEL_SCHEMA.md: periodic pillar rises over 1.0s
 DEFAULT_DROP_SPEED = 700.0  # LEVEL_SCHEMA.md: drop_speed default 700 px/s
+CONNECTIVITY_CELL = 8.0     # LEVEL_SCHEMA.md rule 5: 8px flood-fill grid
+HERO_RECT_W = 24.0          # LEVEL_SCHEMA.md rule 5: hero rect at spawn
+HERO_RECT_H = 44.0          # LEVEL_SCHEMA.md rule 5: hero rect at spawn
 
 PLATFORM_KINDS = {"solid", "dashed", "falling", "tilting", "moving"}
 HAZARD_TYPES = {"spikes", "saw", "spiked_column", "hanging_pillar",
@@ -99,6 +142,90 @@ def seg_point_dist(px, py, x1, y1, x2, y2):
 
 def qb(v, size):
     return int(math.floor(float(v) / size))
+
+
+def _xy(point):
+    if isinstance(point, dict):
+        return float(point["x"]), float(point["y"])
+    return float(point[0]), float(point[1])
+
+
+def connectivity_error(platforms, spawn, door, width, bar_y,
+                       door_w, door_h):
+    """Rule 5 connectivity (LEVEL_SCHEMA.md v2): flood-fill of empty
+    space on an 8px grid over width x bar_y, 4-connected, from the
+    hero rect at spawn to the door rect. A cell is blocked iff it
+    intersects a `solid` platform rect; dashed/falling/tilting/moving
+    platforms and all hazards are OPEN. Returns an error string
+    (prefix `connectivity:`) or None. Necessary for traversability,
+    so it cannot fail a genuinely-passable level. Harness-only: the
+    runtime does not implement it. The generator reuses this exact
+    predicate (imported, never copied) when deciding gantry beams.
+    Returns None for malformed coords: other rules report those."""
+    try:
+        sx, sy = _xy(spawn)
+        dx, dy = _xy(door)
+    except (TypeError, ValueError, KeyError, IndexError):
+        return None
+    cell = CONNECTIVITY_CELL
+    cols = max(1, int(math.ceil(float(width) / cell)))
+    rows = max(1, int(math.ceil(float(bar_y) / cell)))
+    blocked = bytearray(cols * rows)
+
+    def _span(lo, size, limit):
+        c0 = max(0, int(lo // cell))
+        c1 = min(limit - 1, int((lo + size - 1e-9) // cell))
+        return c0, c1
+
+    for p in platforms:
+        if not isinstance(p, dict) or p.get("kind") != "solid":
+            continue
+        if not all(is_num(p.get(k)) for k in ("x", "y", "w", "h")):
+            continue
+        x, y = float(p["x"]), float(p["y"])
+        cx0, cx1 = _span(x, float(p["w"]), cols)
+        cy0, cy1 = _span(y, float(p["h"]), rows)
+        for cy in range(cy0, cy1 + 1):
+            base = cy * cols
+            for cx in range(cx0, cx1 + 1):
+                blocked[base + cx] = 1
+
+    def _open_cells(rx, ry, rw, rh):
+        out = []
+        cx0, cx1 = _span(rx, rw, cols)
+        cy0, cy1 = _span(ry, rh, rows)
+        for cy in range(cy0, cy1 + 1):
+            for cx in range(cx0, cx1 + 1):
+                if not blocked[cy * cols + cx]:
+                    out.append((cx, cy))
+        return out
+
+    seeds = _open_cells(sx - HERO_RECT_W / 2.0, sy - HERO_RECT_H,
+                        HERO_RECT_W, HERO_RECT_H)
+    if not seeds:
+        return ("connectivity: no open cell at spawn (hero rect "
+                "fully blocked by solid)")
+    targets = set(_open_cells(dx - float(door_w) / 2.0,
+                              dy - float(door_h),
+                              float(door_w), float(door_h)))
+    if not targets:
+        return ("connectivity: no open cell at door (door rect "
+                "fully blocked by solid)")
+    seen = set(seeds)
+    queue = deque(seeds)
+    while queue:
+        cx, cy = queue.popleft()
+        if (cx, cy) in targets:
+            return None
+        for nb in ((cx + 1, cy), (cx - 1, cy),
+                   (cx, cy + 1), (cx, cy - 1)):
+            if 0 <= nb[0] < cols and 0 <= nb[1] < rows \
+                    and nb not in seen \
+                    and not blocked[nb[1] * cols + nb[0]]:
+                seen.add(nb)
+                queue.append(nb)
+    return ("connectivity: no path from spawn to door through open "
+            "space (sealed pocket)")
 
 
 # --------------------------------------------------------------------------
@@ -190,6 +317,31 @@ def saw_swept_bbox(h):
             max(ys) - min(ys) + 2 * r)
 
 
+def saw_sweep_centres(h):
+    """Swept saw centres per LEVEL_SCHEMA.md rules 7/8: rest centre,
+    path endpoint, and the 13-sample swing arc (frac -1..1 in 1/6
+    steps). Used ONLY by the grounding / keep-out checks; the older
+    5-sample saw_swept_bbox keeps its existing callers unchanged."""
+    x, y = float(h["x"]), float(h["y"])
+    pts = [(x, y)]
+    if "path" in h and isinstance(h["path"], dict):
+        p = h["path"]
+        if is_num(p.get("x2")) and is_num(p.get("y2")):
+            pts.append((float(p["x2"]), float(p["y2"])))
+    if "swing" in h and isinstance(h["swing"], dict):
+        s = h["swing"]
+        if all(is_num(s.get(k)) for k in ("pivot_x", "pivot_y", "arc_deg")):
+            px, py = float(s["pivot_x"]), float(s["pivot_y"])
+            ox, oy = x - px, y - py
+            for k in range(13):
+                frac = -1.0 + k / 6.0
+                ang = math.radians(float(s["arc_deg"])) * 0.5 * frac
+                ca, sa = math.cos(ang), math.sin(ang)
+                pts.append((px + ox * ca - oy * sa,
+                            py + ox * sa + oy * ca))
+    return pts
+
+
 def popup_up_at(h, t):
     """True if a pop-up (period/phase/on_time) hazard is lethal at time t."""
     period = float(h["period"])
@@ -238,6 +390,8 @@ class LevelCheck:
         self.solution = None  # chosen path: list of platform indices
         self.solution_edges = []
         self.structural_ok = True
+        self.density = None  # rule 9 stats, set by check_density_floor
+        self.grounded_solids = set()  # rule 7 fixpoint, set by check_grounding
 
     # -- (a) fields / params ----------------------------------------------
     def check_fields(self):
@@ -462,6 +616,507 @@ class LevelCheck:
         if drect[0] < 0 or drect[1] < 0 or drect[0] + drect[2] > W \
                 or drect[1] + drect[3] > H:
             self.errors.append("door rect outside bounds")
+
+    # -- (b2) HUD keep-out (rule 8) ---------------------------------------
+    def check_hud_keepout(self):
+        lv = self.lv
+        for i, p in enumerate(lv["platforms"]):
+            if not all(is_num(p.get(k)) for k in ("x", "y", "w", "h")):
+                continue
+            rects = [(float(p["x"]), float(p["y"]), float(p["w"]),
+                      float(p["h"]))]
+            if p.get("kind") == "moving" and is_num(p.get("dx")) \
+                    and is_num(p.get("dy")):
+                rects.append((rects[0][0] + float(p["dx"]),
+                              rects[0][1] + float(p["dy"]),
+                              rects[0][2], rects[0][3]))
+            for (_rx, ry, _rw, _rh) in rects:
+                if ry < HUD_KEEPOUT_Y:
+                    self.errors.append(
+                        "keep-out: platforms[%d] drawn extent reaches "
+                        "y=%g < %g" % (i, ry, HUD_KEEPOUT_Y))
+                    break
+        for i, h in enumerate(lv["hazards"]):
+            t = h.get("type")
+            if t == "saw":
+                if not (is_num(h.get("x")) and is_num(h.get("y"))
+                        and is_num(h.get("r"))):
+                    continue
+                r = float(h["r"])
+                for (_cx, cy) in saw_sweep_centres(h):
+                    if cy - r < HUD_KEEPOUT_Y:
+                        self.errors.append(
+                            "keep-out: hazards[%d] saw sweep reaches "
+                            "y=%g < %g" % (i, cy - r, HUD_KEEPOUT_Y))
+                        break
+            elif is_num(h.get("y")) and float(h["y"]) < HUD_KEEPOUT_Y:
+                self.errors.append(
+                    "keep-out: hazards[%d] %s rect top y=%g < %g"
+                    % (i, t, float(h["y"]), HUD_KEEPOUT_Y))
+        sp, dr = lv["spawn"], lv["door"]
+        if is_num(sp.get("y")) and float(sp["y"]) < SPAWN_MIN_Y:
+            self.errors.append("keep-out: spawn feet y=%g < %g"
+                               % (float(sp["y"]), SPAWN_MIN_Y))
+        if is_num(dr.get("y")) and float(dr["y"]) < DOOR_MIN_Y:
+            self.errors.append("keep-out: door base y=%g < %g"
+                               % (float(dr["y"]), DOOR_MIN_Y))
+
+    # -- (b3) grounding (rule 7) ------------------------------------------
+    def _rects(self):
+        """Numeric (x, y, w, h) per platform, None if malformed."""
+        out = []
+        for p in self.lv["platforms"]:
+            if all(is_num(p.get(k)) for k in ("x", "y", "w", "h")):
+                out.append((float(p["x"]), float(p["y"]), float(p["w"]),
+                            float(p["h"])))
+            else:
+                out.append(None)
+        return out
+
+    @staticmethod
+    def _x_overlap(a, b):
+        return min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0])
+
+    @staticmethod
+    def _y_overlap(a, b):
+        return min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1])
+
+    def _resting_on(self, r, rects, grounded):
+        """True if rect r rests on grounded solid tops: one support with
+        x-overlap >= 48, or both end regions on supports (combined
+        overlap >= 48). Gap <= GROUND_TOL in all cases."""
+        bottom = r[1] + r[3]
+        total = 0.0
+        left_ok = right_ok = False
+        third = max(8.0, r[2] / 3.0)
+        for j in grounded:
+            s = rects[j]
+            if abs(bottom - s[1]) > GROUND_TOL:
+                continue
+            ov = self._x_overlap(r, s)
+            if ov >= MIN_PILLAR_W:
+                return True
+            total += max(0.0, ov)
+            if self._x_overlap((r[0], r[1], third, r[3]), s) >= 8.0:
+                left_ok = True
+            if self._x_overlap((r[0] + r[2] - third, r[1], third, r[3]),
+                               s) >= 8.0:
+                right_ok = True
+        return left_ok and right_ok and total >= MIN_PILLAR_W
+
+    def _grounded_solids(self, rects):
+        """Fixpoint set of grounded solid indices: floor, resting,
+        pillar-connected, or both-ends-touching. A support must itself
+        be grounded, so floating stacks never ground each other."""
+        plats = self.lv["platforms"]
+        bar_y = self.tun.bar_y
+        grounded = set()
+        changed = True
+        while changed:
+            changed = False
+            for i, r in enumerate(rects):
+                if r is None or i in grounded \
+                        or plats[i].get("kind") != "solid":
+                    continue
+                bottom = r[1] + r[3]
+                ok = abs(bottom - bar_y) <= GROUND_TOL
+                if not ok:
+                    ok = self._resting_on(r, rects, grounded)
+                if not ok:
+                    # Pillar-connected: a grounded pillar (w >= 48)
+                    # whose top touches this bottom and whose x-span
+                    # lies within this platform's x-span.
+                    for j in grounded:
+                        q = rects[j]
+                        if q[2] < MIN_PILLAR_W:
+                            continue
+                        if abs(q[1] - bottom) <= GROUND_TOL \
+                                and q[0] >= r[0] \
+                                and q[0] + q[2] <= r[0] + r[2]:
+                            ok = True
+                            break
+                if not ok:
+                    left = right = False
+                    for j in grounded:
+                        s = rects[j]
+                        if self._y_overlap(r, s) >= 8.0:
+                            if abs((s[0] + s[2]) - r[0]) <= GROUND_TOL:
+                                left = True
+                            if abs(s[0] - (r[0] + r[2])) <= GROUND_TOL:
+                                right = True
+                    ok = left and right
+                if ok:
+                    grounded.add(i)
+                    changed = True
+        return grounded
+
+    def _shaft_flanked(self, idx, rects, grounded):
+        """True if grounded solid columns flank BOTH ends within 8px and
+        span the platform's full y-range (full sweep range if moving).
+        For moving platforms the flank gaps are measured from the
+        swept x-extent, so a sliding platform never sinks into its
+        shaft walls at full travel."""
+        p = self.lv["platforms"][idx]
+        r = rects[idx]
+        y0, y1 = r[1], r[1] + r[3]
+        x0, x1 = r[0], r[0] + r[2]
+        if p.get("kind") == "moving":
+            if is_num(p.get("dy")):
+                dy = float(p["dy"])
+                y0, y1 = min(y0, y0 + dy), max(y1, y1 + dy)
+            if is_num(p.get("dx")):
+                dx = float(p["dx"])
+                x0, x1 = min(x0, x0 + dx), max(x1, x1 + dx)
+        left = right = False
+        for j in grounded:
+            s = rects[j]
+            if s[1] > y0 + GROUND_TOL or s[1] + s[3] < y1 - GROUND_TOL:
+                continue
+            if -GROUND_TOL <= x0 - (s[0] + s[2]) <= SHAFT_FLANK_GAP:
+                left = True
+            if -GROUND_TOL <= s[0] - x1 <= SHAFT_FLANK_GAP:
+                right = True
+        return left and right
+
+    def _spikes_seated(self, h, rects, grounded):
+        r = (float(h["x"]), float(h["y"]), float(h["w"]), float(h["h"]))
+        d = h.get("dir", "up")
+        plats = self.lv["platforms"]
+        solids = [(j, rects[j]) for j in range(len(rects))
+                  if rects[j] is not None
+                  and plats[j].get("kind") == "solid"]
+        if d == "up":
+            bottom = r[1] + r[3]
+            return any(abs(bottom - s[1]) <= GROUND_TOL
+                       and self._x_overlap(r, s) >= 8.0
+                       for _j, s in solids)
+        if d == "down":
+            return any(j in grounded
+                       and abs(r[1] - (s[1] + s[3])) <= GROUND_TOL
+                       and self._x_overlap(r, s) >= 8.0
+                       for j, s in solids)
+        # left/right: a side face within 4px of a solid side.
+        for _j, s in solids:
+            if self._y_overlap(r, s) >= 8.0:
+                if abs((r[0] + r[2]) - s[0]) <= GROUND_TOL \
+                        or abs(r[0] - (s[0] + s[2])) <= GROUND_TOL:
+                    return True
+        return False
+
+    def check_grounding(self):
+        plats = self.lv["platforms"]
+        rects = self._rects()
+        grounded = self._grounded_solids(rects)
+        self.grounded_solids = grounded
+        for i, p in enumerate(plats):
+            if rects[i] is None:
+                continue
+            kind = p.get("kind")
+            if kind == "solid":
+                if i not in grounded:
+                    self.errors.append(
+                        "grounding: platforms[%d] solid is unsupported "
+                        "(floating)" % i)
+            elif kind in ("dashed", "falling", "tilting", "moving"):
+                if not (self._resting_on(rects[i], rects, grounded)
+                        or self._shaft_flanked(i, rects, grounded)):
+                    self.errors.append(
+                        "grounding: platforms[%d] %s is unsupported "
+                        "(needs shaft-flank or resting ends)"
+                        % (i, kind))
+        solid_rects = [rects[j] for j in range(len(rects))
+                       if rects[j] is not None
+                       and plats[j].get("kind") == "solid"]
+        for i, h in enumerate(self.lv["hazards"]):
+            t = h.get("type")
+            if t in ("hanging_pillar", "dotted_line"):
+                continue  # exempt from grounding by the schema
+            if not all(is_num(h.get(k)) for k in ("x", "y", "w", "h")):
+                continue
+            if t == "spikes":
+                if not self._spikes_seated(h, rects, grounded):
+                    self.errors.append(
+                        "grounding: hazards[%d] spikes not seated "
+                        "(dir=%s)" % (i, h.get("dir", "up")))
+            elif t == "saw":
+                if not is_num(h.get("r")):
+                    continue
+                r = float(h["r"])
+                for (cx, cy) in saw_sweep_centres(h):
+                    if not any(point_rect_dist(cx, cy, s) <= r + GROUND_TOL
+                               for s in solid_rects):
+                        self.errors.append(
+                            "grounding: hazards[%d] saw disc does not "
+                            "touch solid at swept centre (%g,%g)"
+                            % (i, cx, cy))
+                        break
+                if "swing" in h and isinstance(h["swing"], dict):
+                    s = h["swing"]
+                    if all(is_num(s.get(k))
+                           for k in ("pivot_x", "pivot_y")):
+                        px, py = float(s["pivot_x"]), float(s["pivot_y"])
+                        inside = any(
+                            j in grounded and rects[j][0] <= px
+                            <= rects[j][0] + rects[j][2]
+                            and rects[j][1] <= py
+                            <= rects[j][1] + rects[j][3]
+                            for j in range(len(rects))
+                            if rects[j] is not None)
+                        if not inside:
+                            self.errors.append(
+                                "grounding: hazards[%d] swing pivot not "
+                                "inside a grounded solid beam" % i)
+            elif t == "spiked_column":
+                r = (float(h["x"]), float(h["y"]), float(h["w"]),
+                     float(h["h"]))
+                bottom, top = r[1] + r[3], r[1]
+                on_top = abs(bottom - self.tun.bar_y) <= GROUND_TOL \
+                    or any(abs(bottom - s[1]) <= GROUND_TOL
+                           and self._x_overlap(r, s) >= 8.0
+                           for s in solid_rects)
+                hung = any(j in grounded
+                           and abs(top - (rects[j][1] + rects[j][3]))
+                           <= GROUND_TOL
+                           and self._x_overlap(r, rects[j]) >= 8.0
+                           for j in range(len(rects))
+                           if rects[j] is not None)
+                if not (on_top or hung):
+                    self.errors.append(
+                        "grounding: hazards[%d] spiked_column unsupported "
+                        "(needs solid top/floor or grounded beam)" % i)
+
+    # -- (b3b) hazard/solid area-overlap (rule 7) ------------------------
+    def check_hazard_solid_overlap(self):
+        """Rect hazards must not area-overlap solid rects beyond the
+        4px seating tolerance: an intersection with width > 4 AND
+        height > 4 fails. Saws (disc geometry), hanging_pillar (beam
+        mounts) and dotted_line (indicators) are exempt. Harness
+        only; the runtime does not check this."""
+        rects = self._rects()
+        plats = self.lv["platforms"]
+        solids = [(j, rects[j]) for j in range(len(rects))
+                  if rects[j] is not None
+                  and plats[j].get("kind") == "solid"]
+        for i, h in enumerate(self.lv["hazards"]):
+            t = h.get("type")
+            if t not in ("spikes", "spiked_column"):
+                continue
+            if not all(is_num(h.get(k)) for k in ("x", "y", "w", "h")):
+                continue
+            r = (float(h["x"]), float(h["y"]), float(h["w"]),
+                 float(h["h"]))
+            for j, s in solids:
+                iw = self._x_overlap(r, s)
+                ih = self._y_overlap(r, s)
+                if iw > OVERLAP_TOL and ih > OVERLAP_TOL:
+                    self.errors.append(
+                        "overlap: hazards[%d] %s overlaps platforms[%d] "
+                        "solid by %gx%g (seating tolerance is 4px)"
+                        % (i, t, j, iw, ih))
+                    break
+
+    # -- (b4) density floor (rule 9) --------------------------------------
+    def check_density_floor(self):
+        rects = self._rects()
+        count = 0
+        width = 0.0
+        core_count = 0
+        core_width = 0.0
+        for i, r in enumerate(rects):
+            if r is None or self.lv["platforms"][i].get("kind") != "solid":
+                continue
+            if r[1] < DENSITY_BAND_BOTTOM \
+                    and r[1] + r[3] > DENSITY_BAND_TOP:
+                count += 1
+                width += r[2]
+            # Core-middle floor: edge-touching rects (the edge walls)
+            # do not count; only interior structure fills the middle.
+            if r[0] != 0.0 and r[0] + r[2] != self.tun.width \
+                    and r[1] < CORE_BAND_BOTTOM \
+                    and r[1] + r[3] > CORE_BAND_TOP:
+                core_count += 1
+                core_width += r[2]
+        # Core-middle floor, decorations half (rules 9 + 10):
+        # decoration rects count TOGETHER with solid rects. The
+        # y150..450 floor above stays solid-only. Malformed deco
+        # entries are reported by check_decorations and skipped
+        # here, never counted.
+        for d in self._deco_rects():
+            if d is None:
+                continue
+            if d[0] != 0.0 and d[0] + d[2] != self.tun.width \
+                    and d[1] < CORE_BAND_BOTTOM \
+                    and d[1] + d[3] > CORE_BAND_TOP:
+                core_count += 1
+                core_width += d[2]
+        hz = len(self.lv["hazards"])
+        ok = count >= DENSITY_MIN_RECTS and width >= DENSITY_MIN_WIDTH
+        core_ok = core_count >= CORE_MIN_RECTS \
+            and core_width >= CORE_MIN_WIDTH
+        self.density = {"rect_count": count, "combined_width": width,
+                        "hazard_count": hz, "pass": ok and core_ok,
+                        "core_rect_count": core_count,
+                        "core_combined_width": core_width,
+                        "core_pass": core_ok}
+        if not ok:
+            self.errors.append(
+                "density: only %d solid rect(s) in middle band "
+                "y150..450, combined width %g (need >= %d rects "
+                "and width >= %g)"
+                % (count, width, DENSITY_MIN_RECTS, DENSITY_MIN_WIDTH))
+        if not core_ok:
+            self.errors.append(
+                "core-middle: only %d non-edge solid/decoration "
+                "rect(s) intersecting y260..420, combined width %g "
+                "(need >= %d rects and width >= %g)"
+                % (core_count, core_width, CORE_MIN_RECTS,
+                   CORE_MIN_WIDTH))
+
+    def _deco_rects(self):
+        """Numeric (x, y, w, h) per decoration, None if malformed.
+        A missing `decorations` array means [] (valid, no entries)."""
+        decos = self.lv.get("decorations") \
+            if isinstance(self.lv, dict) else None
+        if not isinstance(decos, list):
+            return []
+        out = []
+        for d in decos:
+            if isinstance(d, dict) \
+                    and all(is_num(d.get(k)) for k in ("x", "y", "w", "h")):
+                out.append((float(d["x"]), float(d["y"]), float(d["w"]),
+                            float(d["h"])))
+            else:
+                out.append(None)
+        return out
+
+    def _hazard_block_rect(self, h):
+        """Blocking rect for decoration overlap (rule 10): the hazard
+        rect for rect hazards; the swept disc bbox for saws (a saw's
+        x/y is its centre, so its (x, y, w, h) is not a rect). None
+        if the hazard is malformed (other checks report it)."""
+        if h.get("type") == "saw":
+            if not all(is_num(h.get(k)) for k in ("x", "y", "r")):
+                return None
+            try:
+                return saw_swept_bbox(h)
+            except Exception:
+                return None
+        if all(is_num(h.get(k)) for k in ("x", "y", "w", "h")):
+            return (float(h["x"]), float(h["y"]), float(h["w"]),
+                    float(h["h"]))
+        return None
+
+    @staticmethod
+    def _deco_touches(a, b):
+        """Edge-adjacency within 4px (rule 10 attachment): area
+        overlap, or a <= 4px gap on one axis with positive overlap
+        on the other. Corner-only proximity does not count."""
+        xov = min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0])
+        yov = min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1])
+        if xov > 0 and yov > 0:
+            return True
+        if xov > 0 and -DECO_ATTACH_TOL <= yov <= 0:
+            return True
+        if yov > 0 and -DECO_ATTACH_TOL <= xov <= 0:
+            return True
+        return False
+
+    # -- (b5) decorations (rule 10) -------------------------------------
+    def check_decorations(self):
+        """Rule 10 (harness only): attachment chain to a solid,
+        HUD keep-out, no overlap with any hazard rect / the spawn
+        hero rect / the door rect, bounds + minima. A missing array
+        means [] (valid). Error prefix `deco:`."""
+        if not isinstance(self.lv, dict) or "decorations" not in self.lv:
+            return
+        decos = self.lv["decorations"]
+        if not isinstance(decos, list):
+            self.errors.append("deco: decorations must be an array")
+            return
+        tun = self.tun
+        W, H = tun.width, tun.bar_y
+        rects = self._deco_rects()
+        for i, r in enumerate(rects):
+            if r is None:
+                self.errors.append(
+                    "deco: decorations[%d] must be {x, y, w, h} numbers"
+                    % i)
+                continue
+            x, y, w, h = r
+            if x < 0 or x + w > W or y + h > H:
+                self.errors.append(
+                    "deco: decorations[%d] outside bounds 0..%g / "
+                    "90..%g (rect %g,%g %gx%g)" % (i, W, H, x, y, w, h))
+            if w < DECO_MIN_W:
+                self.errors.append(
+                    "deco: decorations[%d] w=%g < %g" % (i, w, DECO_MIN_W))
+            if h < DECO_MIN_H:
+                self.errors.append(
+                    "deco: decorations[%d] h=%g < %g" % (i, h, DECO_MIN_H))
+            if y < HUD_KEEPOUT_Y:
+                self.errors.append(
+                    "deco: decorations[%d] keep-out: top y=%g < %g"
+                    % (i, y, HUD_KEEPOUT_Y))
+        # No overlap with hazards / spawn hero / door (area > 0).
+        blockers = []
+        for h in self.lv.get("hazards", []):
+            blockers.append(self._hazard_block_rect(h)
+                            if isinstance(h, dict) else None)
+        sp = self.lv.get("spawn")
+        hero = None
+        if isinstance(sp, dict) and is_num(sp.get("x")) \
+                and is_num(sp.get("y")):
+            hero = (float(sp["x"]) - HERO_RECT_W / 2.0,
+                    float(sp["y"]) - HERO_RECT_H,
+                    HERO_RECT_W, HERO_RECT_H)
+        try:
+            door = self.door_rect()
+        except Exception:
+            door = None
+        for i, r in enumerate(rects):
+            if r is None:
+                continue
+            for j, b in enumerate(blockers):
+                if b is not None and rects_overlap(r, b):
+                    self.errors.append(
+                        "deco: decorations[%d] overlaps hazards[%d] "
+                        "hazard rect" % (i, j))
+                    break
+            if hero is not None and rects_overlap(r, hero):
+                self.errors.append(
+                    "deco: decorations[%d] overlaps the spawn hero rect"
+                    % i)
+            if door is not None and rects_overlap(r, door):
+                self.errors.append(
+                    "deco: decorations[%d] overlaps the door rect" % i)
+        # Attachment chain: every deco must touch a solid platform
+        # rect, or another deco that does (fixpoint over the set).
+        solids = []
+        for r, p in zip(self._rects(), self.lv.get("platforms", [])):
+            if r is not None and isinstance(p, dict) \
+                    and p.get("kind") == "solid":
+                solids.append(r)
+        attached = set()
+        for i, r in enumerate(rects):
+            if r is not None \
+                    and any(self._deco_touches(r, s) for s in solids):
+                attached.add(i)
+        changed = True
+        while changed:
+            changed = False
+            for i, r in enumerate(rects):
+                if r is None or i in attached:
+                    continue
+                if any(j in attached and rects[j] is not None
+                       and self._deco_touches(r, rects[j])
+                       for j in range(len(rects))):
+                    attached.add(i)
+                    changed = True
+        for i, r in enumerate(rects):
+            if r is not None and i not in attached:
+                self.errors.append(
+                    "deco: decorations[%d] is not attached to any "
+                    "solid platform (no attachment chain)" % i)
 
     def door_rect(self):
         tun = self.tun
@@ -1172,7 +1827,17 @@ class LevelCheck:
                                  % (path[si], path[si + 1], msg))
         return failures, notes
 
-    def check_reachability(self, max_paths=300):
+    def check_connectivity(self):
+        err = connectivity_error(
+            self.lv.get("platforms", []), self.lv.get("spawn", {}),
+            self.lv.get("door", {}), self.tun.width, self.tun.bar_y,
+            self.tun.door_w, self.tun.door_h)
+        if err is not None:
+            self.errors.append(err)
+
+    def check_reachability(self, max_paths=300, with_connectivity=True):
+        if with_connectivity:
+            self.check_connectivity()
         if not getattr(self, "spawn_nodes", None) \
                 or not getattr(self, "door_nodes", None):
             self.errors.append("reachability not evaluated: spawn/door "
@@ -1217,7 +1882,10 @@ class LevelCheck:
         """(layout, traps, solution) -- palette excluded, mirror-normalised.
         Layout: canonical platform nodes + graph edges. Traps: hazard
         multiset with normalised position buckets + trap params.
-        Solution: jump sequence + spawn/door anchors."""
+        Solution: jump sequence + spawn/door anchors. Decorations
+        are EXCLUDED (rule 10): only platforms/hazards/spawn/door
+        feed the signature, so two levels differing only in
+        decorations are duplicates."""
         tun = self.tun
         W = tun.width
         plats = self.lv["platforms"]
@@ -1321,19 +1989,25 @@ class LevelCheck:
         solution = min(solution_sig(False), solution_sig(True))
         return layout, traps, solution
 
-    def run(self, max_paths=300):
+    def run(self, max_paths=300, with_connectivity=True):
         self.check_fields()
         if self.structural_ok:
             # Deeper checks must never crash on malformed data: a check
             # that aborts is recorded as a failure with its reason.
             for fn in (self.check_bounds,
+                       self.check_hud_keepout,
+                       self.check_grounding,
+                       self.check_hazard_solid_overlap,
+                       self.check_density_floor,
+                       self.check_decorations,
                        self.check_safe_zones_and_ground):
                 try:
                     fn()
                 except Exception as exc:
                     self.errors.append("%s aborted: %s" % (fn.__name__, exc))
             try:
-                self.check_reachability(max_paths=max_paths)
+                self.check_reachability(max_paths=max_paths,
+                                        with_connectivity=with_connectivity)
             except Exception as exc:
                 self.errors.append("check_reachability aborted: %s" % exc)
         return self
@@ -1379,6 +2053,7 @@ def verify_levels(data, tun, max_paths=300):
         results.append({"index": idx, "id": lid, "errors": chk.errors,
                         "notes": chk.notes, "layout": layout,
                         "traps": traps, "solution": solution,
+                        "density": chk.density,
                         "duplicate_of": None})
     # Dedupe: distinct iff signatures differ AND >= 2 dims differ.
     n = len(results)
@@ -1441,6 +2116,23 @@ SELFTESTS = [
     ("negative_unknown_kind.json", False, "unknown kind"),
     ("negative_timed.json", False, "window"),
     ("negative_oob.json", False, "bounds"),
+    ("negative_floating.json", False, "grounding"),
+    ("negative_keepout.json", False, "keep-out"),
+    ("negative_unseated_spikes.json", False, "seated"),
+    ("negative_empty_middle.json", False, "density"),
+    ("positive_grounded.json", True, None),
+    ("negative_sealed_pocket.json", False, "connectivity"),
+    ("positive_connectivity.json", True, None),
+    ("negative_core_middle_empty.json", False, "core-middle"),
+    ("positive_core_middle.json", True, None),
+    ("negative_overlap.json", False, "overlap"),
+    ("positive_seated_contact.json", True, None),
+    ("negative_deco_floating.json", False, "deco:"),
+    ("negative_deco_hazard_overlap.json", False, "deco:"),
+    ("negative_deco_keepout.json", False, "deco:"),
+    ("positive_deco.json", True, None),
+    ("positive_deco_connectivity.json", True, None),
+    ("positive_no_decorations.json", True, None),
 ]
 
 
@@ -1492,6 +2184,8 @@ def main(argv=None):
                     help="write full JSON report to this path")
     ap.add_argument("--quiet", action="store_true",
                     help="only print totals")
+    ap.add_argument("--density-report", action="store_true",
+                    help="print per-level middle-band density stats")
     ap.add_argument("--max-paths", type=int, default=300)
     ap.add_argument("--selftest", action="store_true",
                     help="run fixture expectations and exit")
@@ -1539,6 +2233,13 @@ def main(argv=None):
                   % ", ".join(str(results[k]["id"]) for k in cl))
     print("TOTAL: %d/%d levels passed (levels.json sha256 %s)"
           % (n_pass, len(results), sha))
+    if args.density_report:
+        for r in results:
+            d = r.get("density") or {}
+            print("DENSITY %s: rects=%s width=%s hazards=%s %s"
+                  % (r["id"], d.get("rect_count"), d.get("combined_width"),
+                     d.get("hazard_count"),
+                     "PASS" if d.get("pass") else "FAIL"))
     if args.json_out:
         out = {"levels_path": str(levels_path), "levels_sha256": sha,
                "tuning_path": str(tuning_path),
@@ -1548,6 +2249,7 @@ def main(argv=None):
                "total": len(results), "passed": n_pass,
                "levels": [{"id": r["id"], "pass": r["pass"],
                            "errors": r["errors"], "notes": r["notes"],
+                           "density": r.get("density"),
                            "duplicate_of": r["duplicate_of"]}
                           for r in results]}
         Path(args.json_out).write_text(json.dumps(out, indent=2),

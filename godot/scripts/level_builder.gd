@@ -6,6 +6,28 @@ extends RefCounted
 # CharacterBody2D player under it. Unknown kind/type is a loud error
 # (callers validate with TTLevelData first and fail fast).
 
+# Draw-only background silhouette (LEVEL_SCHEMA.md rule 10): a plain
+# Node2D with no collision body and no gameplay effect. One per
+# decoration rect, drawn below platforms/hazards/hero/door.
+class DecoRect extends Node2D:
+	var rect := Rect2()
+	var deco_col := Color.WHITE
+
+	func setup(d: Dictionary, color: Color) -> void:
+		rect = Rect2(float(d.get("x", 0.0)), float(d.get("y", 0.0)), float(d.get("w", 0.0)), float(d.get("h", 0.0)))
+		deco_col = color
+		# Background layer: z 0 draws ABOVE the opaque bg ColorRect
+		# (game.gd adds bg before the runtime node, so same-z tree
+		# order puts runtime children over it) and BELOW platforms
+		# (z 0, added after decorations), door (z 1), hazards
+		# (z 10), and the player (z 20). z -1 drew UNDER the bg.
+		z_index = 0
+		position = rect.position
+
+	func _draw() -> void:
+		draw_rect(Rect2(Vector2.ZERO, rect.size), deco_col)
+
+
 var root: TTRuntime = null
 var player: TTPlayer = null
 var platforms: Array = []
@@ -22,6 +44,8 @@ func build_level(level: Dictionary, tuning: Dictionary) -> Node:
 	palette = TTuning.palette(tuning, int(level.get("palette", 0)))
 	var plat_col := TTuning.col(str(palette.get("platform", "#2B0A8A")))
 	var trap_col := TTuning.col(str(palette.get("trap", "#2B0A8A")))
+	var bg_col := TTuning.col(str(palette.get("bg", "#E8871E")))
+	var deco_col := trap_col.lerp(bg_col, 0.55)
 	var pl: Dictionary = tuning.get("player", {})
 	var gravity := float(pl.get("gravity", 2200.0))
 	var bar_y := float(tuning.get("control_bar", {}).get("y", 580))
@@ -35,6 +59,16 @@ func build_level(level: Dictionary, tuning: Dictionary) -> Node:
 	var spawn: Dictionary = level.get("spawn", {})
 	spawn_point = Vector2(float(spawn.get("x", 70)), float(spawn.get("y", 500)))
 	player.position = spawn_point + Vector2(0, -player.ph * 0.5)
+	# Decorations: draw-only, background layer, never added to the
+	# platforms/hazards arrays (no collision, no gameplay effect).
+	# Missing array = none. Malformed entries are skipped silently:
+	# rule 10 validation is harness-only, the runtime never warns.
+	for d in level.get("decorations", []):
+		if typeof(d) != TYPE_DICTIONARY:
+			continue
+		var deco := DecoRect.new()
+		deco.setup(d, deco_col)
+		rt.add_child(deco)
 	for p in level.get("platforms", []):
 		var kind := str(p.get("kind", ""))
 		if not TTLevelData.PLATFORM_KINDS.has(kind):

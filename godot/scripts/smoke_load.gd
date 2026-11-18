@@ -32,7 +32,7 @@ func _initialize() -> void:
 			{"type": "dotted_line", "x": 280, "y": 440, "w": 160, "h": 8, "linked": 0},
 		],
 	}
-	var data := {"schema_version": 1, "tuning_version": 1, "levels": [lv1, lv2]}
+	var data := {"schema_version": 2, "tuning_version": 1, "levels": [lv1, lv2]}
 	var err: String = data_script.validate_file(data, tuning)
 	if err != "":
 		print("SMOKE ERROR: validation failed: ", err)

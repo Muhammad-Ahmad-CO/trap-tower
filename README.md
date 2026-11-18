@@ -1,9 +1,10 @@
 # Trap Tower
 
 An ORIGINAL minimalist 2D tricky platformer for Android, built with Godot 4.3.
-One screen = one stage. Flat 2-colour stages, a tiny runner, hidden traps, and
-one small white door. Stages ship in doors of 5 — one gimmick per door, one
-palette per door — chosen from a world map. No copied assets, characters,
+One screen = one level. Flat 2-colour levels, a tiny runner, hidden traps, and
+one small white door. Levels ship FLAT: 215 individually selectable levels in
+43 archetype groups of 5 — one gimmick per group, one palette per group —
+chosen from a world map with one node per level. No copied assets, characters,
 levels, or names from any other game — everything here is original.
 
 Made by Ahmed.
@@ -12,12 +13,14 @@ Made by Ahmed.
 
 - Move with the left / right arrows, jump with the big up-arrow button.
 - Reach the white door. Spikes, saws, falling floors, and dropping pillars
-  restart the stage instantly — tap to retry. Watch for dotted lines — they
+  restart the level instantly — tap to retry. Watch for dotted lines — they
   warn of traps. The floor itself lies: some floors vanish or drop.
-- After 3 deaths in a row, a Skip button appears (it unlocks the next stage
-  without completing the current one). Pause and restart buttons are at the
-  top-left. Sound and music settings live on the map screen.
-- Complete stages to unlock the next ones. Progress is saved on the device.
+- After 3 deaths in a row, a Skip button appears (it unlocks the next level
+  without completing the current one, then returns to the map). Pause and
+  restart buttons are at the top-left; the top-centre HUD shows the level
+  number (LEVEL N). Sound and music settings live on the map screen.
+- Complete a level to unlock the next one; winning returns to the map.
+  Progress is saved on the device.
 
 ## Build (CI)
 
@@ -31,21 +34,22 @@ the `trap-tower-apk` artifact.
 - `godot/` — the Godot project (all art is drawn in code; no binary assets).
   - `godot/data/tuning.json` — frozen physics + palette constants (palettes
     are append-only; physics values never change without re-verification).
-  - `godot/data/levels.json` — shipped stages (generated + assembled; see below).
+  - `godot/data/levels.json` — shipped levels (generated + assembled; see below).
 - `tools/make_icon.py` — generates the launcher icon (`godot/assets/icon.png`,
   stdlib only, deterministic). The PNG is a build artifact and is not
   committed; CI runs this before the Godot import step.
-- `tools/generate_levels.py` — stage generator (door archetypes x variations;
+- `tools/generate_levels.py` — level generator (archetype groups x variations;
   writes a candidates file, never the shipped file directly).
 - `tools/assemble_levels.py` — assembles the shipped `levels.json` from
-  autopilot-passing candidates (first passing variant per door/slot).
+  autopilot-passing candidates (first passing variant per archetype/slot;
+  tops up from spare archetype D44; fails below a 200-level floor).
 - `tools/check_levels.py` — static solvability + distinctness verifier.
 - `tools/autopilot/` — headless playthrough verification through real physics.
 - `tools/touch_test/` — injected multi-touch input tests.
 - `tools/probes/` — headless behaviour probes (death flow, UI flows).
-- `LEVEL_SCHEMA.md` — the level-data contract (v1).
+- `LEVEL_SCHEMA.md` — the level-data contract (v2).
 
-Stages are data-driven: every shipped stage must pass the static harness AND a
+Levels are data-driven: every shipped level must pass the static harness AND a
 headless autopilot playthrough in the FINAL assembled file. The verified count
 is reported from the verification run, never assumed.
 

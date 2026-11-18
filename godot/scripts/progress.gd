@@ -1,14 +1,17 @@
 class_name TTProgress
 extends RefCounted
 
-# Save: ConfigFile user://progress.cfg, save_version 2.
+# Save: ConfigFile user://progress.cfg, save_version 3.
 # Keys use stable level IDs, never array indices. highest_unlocked is monotonic.
 # Version 2: the Run 2 redesign replaced every level ID/geometry, so a
 # version mismatch returns fresh progress (the old file is left alone
 # until the next save — downgrade-resurrection is documented, not fixed).
+# Version 3: the Run 3 flatten + regeneration replaced every level
+# ID/geometry again, so v2 saves are ignored (fresh progress), never
+# migrated. Same rule as v2, new version number only.
 
 const PATH := "user://progress.cfg"
-const SAVE_VERSION := 2
+const SAVE_VERSION := 3
 
 static func load_progress() -> Dictionary:
 	var data := {"save_version": SAVE_VERSION, "highest_unlocked": 0, "completed": []}

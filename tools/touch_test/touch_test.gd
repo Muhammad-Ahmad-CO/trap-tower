@@ -384,11 +384,51 @@ func _record(case_id: String, title: String, status: String,
 	print("[%s] %s: %s -- %s" % [case_id, title, status, detail])
 
 
+# Rect assertion (Run 3): the jump button must be at least as wide as
+# the move buttons (game: jump 210x100 vs 130-wide move buttons) and
+# the jump button must carry an up-arrow. Widths/heights are asserted
+# from the discovered runtime rects. The up-arrow is checked at the
+# drawn-geometry level: the touch-controls script's jump branch draws
+# a polygon whose apex sits above the button centre (c.y - 38), i.e.
+# pointing up; the RENDERED arrow is eyes-on work (screenshots).
+# Fixture mode has no drawn arrow: widths only, labelled as such.
+func _check_rects() -> void:
+	var mode: String = str(_args.get("mode", "game"))
+	var jl: Rect2 = _button_rects.get("left", Rect2())
+	var jr: Rect2 = _button_rects.get("right", Rect2())
+	var jj: Rect2 = _button_rects.get("jump", Rect2())
+	var detail := "left=%s right=%s jump=%s" % [str(jl), str(jr), str(jj)]
+	var widths_ok := jj.size.x >= jl.size.x and jj.size.x >= jr.size.x \
+			and jj.size.x > 0.0
+	if mode == "fixture":
+		_record("rect", "jump button rect >= move buttons (fixture: widths only)",
+				"PASS" if widths_ok else "FAIL", detail + " (fixture has no drawn arrow)")
+		return
+	var arrow_ok := false
+	var sources: Array = []
+	if _controls_node != null:
+		var scr: Script = _controls_node.get_script() as Script
+		if scr != null:
+			sources.append(str(scr.resource_path))
+	sources.append("res://scripts/touch_controls.gd")
+	for sp in sources:
+		if FileAccess.file_exists(sp):
+			var src := FileAccess.get_file_as_string(sp)
+			if src.contains("Vector2(c.x, c.y - 38)"):
+				arrow_ok = true
+				break
+	_record("rect", "jump button rect >= move buttons + up-arrow present",
+			"PASS" if (widths_ok and arrow_ok) else "FAIL",
+			detail + " up_arrow_apex_above_centre=%s" % str(arrow_ok))
+
+
 # ---------------------------------------------------------------------------
 # Cases (a)-(d)
 # ---------------------------------------------------------------------------
 
 func _run_cases() -> void:
+	# Rect assertion first; cases (a)-(d) below are unchanged.
+	_check_rects()
 	# Precondition: clean slate.
 	await _release_all()
 	await _settle()

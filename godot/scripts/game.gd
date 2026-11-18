@@ -5,8 +5,8 @@ extends Node2D
 # (verifier entry point). Death/win rules live in the built TTRuntime;
 # this node mirrors deaths / level_completed, polls the touch controls
 # into the player, drives the HUD, shows the death-retry prompt and the
-# pause overlay, handles skip/restart, and advances on win (short delay
-# so the win is observable before the next level builds).
+# pause overlay, handles skip/restart, and returns to the map on win
+# (short delay so the win is observable before the scene changes).
 #
 # Frozen contracts kept here: N3 stale-build guard (clear ALL children
 # BEFORE validation); deaths mirrored every physics frame including the
@@ -106,7 +106,7 @@ func _build_from_dict(level: Dictionary, p_tuning: Dictionary, index: int) -> vo
 	add_child(runtime)
 	player = builder.player
 	hud = TTHUD.new()
-	hud.setup(pal, _block_filled())
+	hud.setup(pal, index + 1)
 	hud.pause_pressed.connect(_on_pause_button)
 	hud.restart_pressed.connect(restart_level)
 	hud.skip_pressed.connect(_on_skip_pressed)
@@ -192,19 +192,6 @@ func _build_pause_overlay(pal: Dictionary) -> void:
 	_pause_overlay = overlay
 
 
-func _block_filled() -> int:
-	if levels.is_empty():
-		return 0
-	var progress := TTProgress.load_progress()
-	var done: Array = progress["completed"]
-	var start := (level_index / 5) * 5
-	var count := 0
-	for i in range(start, mini(start + 5, levels.size())):
-		if done.has(str(levels[i].get("id", ""))):
-			count += 1
-	return count
-
-
 func _physics_process(_delta: float) -> void:
 	if _error or runtime == null or not is_instance_valid(runtime):
 		return
@@ -243,12 +230,9 @@ func _process(delta: float) -> void:
 	_win_delay = -1.0
 	get_tree().paused = false
 	_paused = false
-	if level_index + 1 >= levels.size():
-		get_tree().change_scene_to_file("res://scenes/map.tscn")
-	else:
-		level_index += 1
-		TTState.level_index = level_index
-		_build_from_dict(levels[level_index], tuning, level_index)
+	# Win and skip both return to the map. There is no auto-chain
+	# into the next level.
+	get_tree().change_scene_to_file("res://scenes/map.tscn")
 
 
 func pause_game() -> void:
@@ -294,10 +278,11 @@ func _on_skip_pressed() -> void:
 		return
 	if deaths < 3:
 		return
-	# Unpause first: _process (which advances) is frozen while paused.
+	# Unpause first: _process (which returns to the map) is frozen
+	# while paused.
 	resume_game()
-	# Skip unlocks the next stage WITHOUT marking this one complete
-	# and WITHOUT the win sound, then advances like a win.
+	# Skip unlocks the next level WITHOUT marking this one complete
+	# and WITHOUT the win sound, then returns to the map like a win.
 	TTProgress.unlock_level(level_index, levels.size())
 	_win_saved = true
 	_win_delay = 0.3
