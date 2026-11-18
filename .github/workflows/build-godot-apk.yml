@@ -88,9 +88,13 @@ jobs:
           ./Godot_v4.3-stable_linux.x86_64 --headless --path . --export-release "Android" build/trap-tower.apk
           ls -la build/
 
-      - name: Generate debug keystore and sign APK
+      - name: Sign APK with committed debug keystore
+        # The debug keystore is committed on purpose (debug key, standard
+        # "android" password) so every build signs with the SAME key and
+        # updates install over earlier releases. Never generate a fresh
+        # keystore here: a new key breaks update continuity.
         run: |
-          keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          test -f debug.keystore
           APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
           "$APKSIGNER" sign --ks debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android build/trap-tower.apk
           "$APKSIGNER" verify build/trap-tower.apk
