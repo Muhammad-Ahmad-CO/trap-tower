@@ -130,6 +130,12 @@ func _draw() -> void:
 	if air:
 		foot_l = Vector2(-8, 20)
 		foot_r = Vector2(7, 18)
+	# White halo (~2px) so the navy hero stays visible on dark backgrounds.
+	draw_line(hip_l, foot_l, Color.WHITE, 9.0)
+	draw_line(hip_r, foot_r, Color.WHITE, 9.0)
+	draw_rect(Rect2(-11, -12, 22, 26), Color.WHITE)
+	draw_line(Vector2(0, -6), Vector2(facing * 10, 2 - swing * 0.4), Color.WHITE, 8.0)
+	draw_circle(Vector2(0, -14), 10.0, Color.WHITE)
 	draw_line(hip_l, foot_l, body_col, 5.0)
 	draw_line(hip_r, foot_r, body_col, 5.0)
 	draw_rect(Rect2(-9, -10, 18, 22), body_col)

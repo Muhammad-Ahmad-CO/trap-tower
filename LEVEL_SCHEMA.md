@@ -36,14 +36,14 @@ runtime/harness must fail fast with an error (never silently load).
 
 | Field | Type | Required | Meaning |
 |---|---|---|---|
-| `id` | string | yes | Stable ID, e.g. `"L001"`. Never reused, never reordered. Unlock/save keys use IDs, not array indices. |
-| `palette` | int | yes | Index into `tuning.json` palettes. Rotates; palette alone NEVER makes a level distinct. |
+| `id` | string | yes | Stable ID, e.g. `"L001"`. IDs are assembly-versioned: within one shipped file they are never reused or reordered, but a regeneration that reorders geometry assigns new IDs and REQUIRES a save-version bump (see `progress.gd`), because unlock/save keys use IDs. |
+| `palette` | int | yes | Index into `tuning.json` palettes. One palette per door (palette = door index). Palette alone NEVER makes a level distinct. |
 | `spawn` | `{x, y}` | yes | Player feet centre. Must be on/above solid ground with a safe zone: no hazard rect within 40px. |
 | `door` | `{x, y}` | yes | Door centre/base. Must stand on solid ground with a safe zone: no hazard rect within 40px. |
 | `platforms` | array | yes | Solid / special platforms (below). At least the spawn and door ground. |
-| `hazards` | array | yes | May be empty only for the first 3 teaching levels. Otherwise >= 1. |
-| `template` | string | yes | Generator template name (provenance only). |
-| `variation` | string | yes | Variation label (provenance only). |
+| `hazards` | array | yes | May be empty only for the first 3 levels in file order (validator rule). The Run 2 generator emits NO empty-hazard levels: every stage is lethal from door 1. |
+| `template` | string | yes | Generator archetype/door name (provenance only). |
+| `variation` | string | yes | Door/slot/variant code, e.g. `"D03S2V1"` = door 3, stage slot 2, variant 1 (provenance + assembly key). |
 
 ## Platforms
 
@@ -116,15 +116,45 @@ Types:
 
 ## HUD / controls (frozen meanings)
 
-- 5 squares, top centre: filled = levels completed in the current block of
-  5 (block = levels 5k+1..5k+5, in shipped order). The current level counts
-  only after completion.
+- 5 squares, top centre: filled = stages completed in the current door
+  of 5 (door = stages 5k+1..5k+5, in shipped order). The current stage
+  counts only after completion. A skipped stage does NOT fill a square
+  (skip unlocks without completing).
+- Top-left: pause button + restart button (icon buttons, no text).
+  Top-right: Skip button ("SKIP >>"), visible ONLY after >= 3 deaths
+  in the current stage. Skip unlocks the next stage without marking
+  the current one complete.
+- Pause: centred panel with 3 icon buttons (exit to map, restart,
+  resume); the game tree is frozen behind it; the HUD stays visible.
+- Death: NO game-over screen. The character vanishes, traps stay
+  visible in their triggered state, a "TAP TO RETRY" prompt shows, and
+  the stage restarts (respawn at stage start + full trap reset) on the
+  next input or after a short auto-retry delay. The `deaths` counter
+  increments synchronously in the death frame.
+- Level select is a WORLD MAP: door arches joined by dotted paths, the
+  current door glowing with a marker, locked doors unclickable. Tapping
+  a door opens its 5-stage picker. Unlock derives from the highest
+  unlocked stage index, never from the completed-ID set.
 - Control bar (y 580..720) in EVERY level: left arrow, right arrow, and a
   LARGER jump button (bold up arrow, ~1.6x move-button width). Never a
   house/roof shape. Bar fill = trap colour; button fill = bg colour; arrow
   = trap colour. Multi-touch: move + jump simultaneously.
 - No other in-level HUD: no level number, deaths, timer, or score on the
-  play screen. Level numbers live only in level select.
+  play screen. Settings (sound toggle + music volume + close) live on
+  the map screen only.
+
+## Structure (Run 2)
+
+- Stages ship in DOORS of 5, in door-major order: stages 5k+1..5k+5
+  form door k+1, share one gimmick/archetype and one palette. The
+  shipped file MUST contain a multiple of 5 stages starting at index 0
+  (the HUD 5-square blocks and the map picker assume this).
+- Candidate levels carry IDs of the form `D{door:02d}S{slot}V{variant}`
+  and are assembled into the shipped file by `tools/assemble_levels.py`
+  (first passing variant per door/slot; incomplete doors dropped). The
+  shipped file is re-verified end-to-end after assembly; the verified
+  count is read from the shipped file's own verification report, never
+  from the candidates report.
 
 ## Example (minimal teaching level)
 
