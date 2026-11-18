@@ -3,4 +3,7 @@ godot/assets/icon.png
 godot/assets/icon.png.import
 godot/.godot/
 godot/build/
-godot/debug.keystore
+# NOTE: godot/debug.keystore IS committed on purpose: it is the shared debug
+# signing key (standard "android" password) so every CI build signs with the
+# same key and updates install over earlier releases. Never replace it with
+# a freshly generated keystore.
