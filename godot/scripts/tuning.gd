@@ -3,6 +3,17 @@ extends RefCounted
 
 # Frozen physics/palette source of truth: res://data/tuning.json.
 # Loaded at runtime; never hardcode different values elsewhere.
+#
+# Schema v3 single constants (LEVEL_SCHEMA.md): the floor is the
+# viewport height, the fall-death line is FLOOR_Y + 40, and the door
+# size is a schema constant. Every runtime reader uses these, never
+# the DEPRECATED tuning.json `control_bar` / `door` entries (kept
+# present in the file, never read).
+
+const FLOOR_Y := 720.0
+const FALL_DEATH_Y := 760.0
+const DOOR_W := 36.0
+const DOOR_H := 54.0
 
 static var _cache: Dictionary = {}
 

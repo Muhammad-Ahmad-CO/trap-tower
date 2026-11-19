@@ -9,17 +9,20 @@
 #   (c) traps held: a triggered pillar stays down and a falling platform
 #       stays fallen (no reset) while dead
 #   (d) input-edge retry (real dispatched key event) respawns + resets traps
-#   (e) 0.6s auto-retry also respawns + resets traps (separate run, no input)
+#   (e) NO auto-retry: the dead state holds indefinitely with no input
+#       (tap-only, LEVEL_SCHEMA.md v3 — the v1.0.3 0.6s auto-retry timer
+#       was REMOVED in v1.0.4); an input edge after the hold still
+#       respawns + resets traps
 #   (f) a second death after retry works (and touch-edge retry works)
 #
 # Usage:
-#   godot --headless --fixed-fps 60 --path <project> -s tools/probes/death_flow_probe.gd [-- --mode full|auto]
-#   --mode full (default): phase 1 (input-edge) + phase 2 (auto-retry, fresh instance, no input)
-#   --mode auto: phase 2 only, in a fresh process (the truly separate no-input run)
+#   godot --headless --fixed-fps 60 --path <project> -s tools/probes/death_flow_probe.gd [-- --mode full|noauto]
+#   --mode full (default): phase 1 (input-edge) + phase 2 (no-auto-retry hold, fresh instance, no input)
+#   --mode noauto: phase 2 only, in a fresh process (the truly separate no-input run)
 # Prints PASS/FAIL per assertion and exits 0 only if all pass.
-# NOTE: death timing is counted in physics frames at fixed 60fps, so the
-# 0.6s auto-retry lands at ~36 frames; input-edge retry must land well
-# before that to prove it was the input, not the timer.
+# NOTE: death timing is counted in physics frames at fixed 60fps.
+# Tap-only: there is NO auto-retry timer any more (v1.0.4); the dead
+# state must hold until an input edge arrives, however long that takes.
 extends SceneTree
 
 var _fails: Array[String] = []
@@ -29,8 +32,8 @@ var _mode := "full"
 
 func _initialize() -> void:
 	for a in OS.get_cmdline_user_args():
-		if a == "auto":
-			_mode = "auto"
+		if a == "noauto":
+			_mode = "noauto"
 		elif a == "full":
 			_mode = "full"
 	call_deferred("_run")
@@ -57,7 +60,6 @@ func _level() -> Dictionary:
 			{"type": "spikes", "x": 300, "y": 476, "w": 80, "h": 24, "dir": "up"},
 			{"type": "hanging_pillar", "x": 600, "y": 100, "w": 60, "h": 80,
 				"drop_trigger_x": 500, "drop_speed": 700},
-			{"type": "dotted_line", "x": 492, "y": 400, "w": 16, "h": 96, "linked": 1},
 		],
 	}
 
@@ -90,9 +92,27 @@ func _nodes(game: Node) -> Dictionary:
 	return {"runtime": runtime, "player": player, "pillar": pillar, "platform": platform}
 
 
-func _death_label(game: Node) -> Label:
+# Pixel-font death prompt (game.gd builds a TTPixelLabel, not a
+# Label, since v1.0.4). Found by text + visibility, never by type.
+func _death_label(game: Node) -> Node:
 	for child in game.get_children():
-		if child is Label and (child as Label).text == "TAP TO RETRY":
+		if str(child.get("text")) == "TAP TO RETRY":
+			return child
+	return null
+
+
+# HUD pause/restart buttons (IconButtons under the HUD node), for the
+# death-state hidden check.
+func _hud_button(hud: Node, icon: String) -> Control:
+	for child in hud.get_children():
+		if child is Control and str(child.get("icon")) == icon:
+			return child
+	return null
+
+
+func _death_burst(game: Node) -> Node:
+	for child in game.get_children():
+		if child.get_script() != null and str(child.get_script().resource_path).ends_with("death_particles.gd"):
 			return child
 	return null
 
@@ -192,7 +212,7 @@ func _run() -> void:
 	print("N1 death-flow probe mode=", _mode)
 	if _mode == "full":
 		await _phase_input_edge()
-	await _phase_auto_retry()
+	await _phase_no_auto_retry()
 	print("N1 SUMMARY: ", _passes.size(), " passed, ", _fails.size(), " failed")
 	if not _fails.is_empty():
 		print("N1 FAILED: ", ", ".join(_fails))
@@ -245,6 +265,19 @@ func _phase_input_edge() -> void:
 	_check("b2: TAP TO RETRY prompt visible during dead state",
 		label != null and label.visible,
 		"label_found=" + str(label != null))
+	# --- (b2) v1.0.4 visuals: HUD buttons hidden + burst fired --------
+	var hud: Node = game.get("hud")
+	var pause_btn := _hud_button(hud, "pause") if hud != null else null
+	var restart_btn := _hud_button(hud, "restart") if hud != null else null
+	_check("b3: pause + restart buttons HIDDEN during dead state",
+		pause_btn != null and restart_btn != null
+		and not pause_btn.visible and not restart_btn.visible,
+		"pause_visible=" + str(pause_btn.visible if pause_btn != null else "?")
+		+ " restart_visible=" + str(restart_btn.visible if restart_btn != null else "?"))
+	var burst := _death_burst(game)
+	_check("b4: death particle burst fired (particles alive in dead state)",
+		burst != null and int(burst.get("alive_count")) > 0,
+		"alive=" + str(burst.get("alive_count") if burst != null else "?"))
 
 	# --- (c) traps held while dead (10 frames, no input) -----------------
 	var held_ok := true
@@ -272,8 +305,8 @@ func _phase_input_edge() -> void:
 		+ " platform_dy=" + str(float((platform as Node2D).position.y - plat_start.y)))
 
 	# --- (d) input-edge retry (real dispatched key event) ----------------
-	# Death happened ~11 frames ago; the 0.6s timer fires at ~36 frames,
-	# so a retry within 10 frames of the key event proves the input path.
+	# Tap-only (v1.0.4): there is no auto-retry timer any more, so a
+	# retry within 10 frames of the key event proves the input path.
 	var frames_since_death := 11
 	# ENTER, not Space: any key edge retries, and Space is also the
 	# jump key, so a Space retry respawns AND jumps (observed: the
@@ -294,7 +327,7 @@ func _phase_input_edge() -> void:
 		"retry_after_event=" + str(retry_frames) + " frames_since_death=" + str(frames_since_death))
 	await physics_frame
 	await physics_frame
-	var spawn_centre := Vector2(70, 478)
+	var spawn_centre := Vector2(70, 480.5)
 	var pos_ok: bool = player.global_position.distance_to(spawn_centre) <= 2.0
 	_check("d2: retry respawns player at spawn", pos_ok,
 		"pos=" + str(player.global_position))
@@ -310,6 +343,11 @@ func _phase_input_edge() -> void:
 		int(runtime.get("deaths")) == 1 and int(game.get("deaths")) == 1)
 	label = _death_label(game)
 	_check("d6: prompt hidden after retry", label == null or not label.visible)
+	_check("d7: HUD pause + restart visible again after retry",
+		pause_btn != null and restart_btn != null
+		and pause_btn.visible and restart_btn.visible,
+		"pause_visible=" + str(pause_btn.visible if pause_btn != null else "?")
+		+ " restart_visible=" + str(restart_btn.visible if restart_btn != null else "?"))
 
 	# --- (f) second death after retry + touch-edge retry -----------------
 	var trig2 := await _trigger_pillar(n)
@@ -339,8 +377,8 @@ func _phase_input_edge() -> void:
 	await physics_frame
 
 
-func _phase_auto_retry() -> void:
-	print("N1 phase 2: auto-retry, NO input events sent")
+func _phase_no_auto_retry() -> void:
+	print("N1 phase 2: NO auto-retry, NO input events sent (tap-only)")
 	var game := await _build_game()
 	var n := _nodes(game)
 	if n["runtime"] == null or n["player"] == null:
@@ -359,32 +397,46 @@ func _phase_auto_retry() -> void:
 	var kill := await _kill(n, game)
 	_check("e1: phase-2 death detected", int(kill["frames"]) > 0
 		and int(kill["deaths_at"]) == 1, "deaths=" + str(kill["deaths_at"]))
-	# NO input from here on. Count frames until respawn.
+	# NO input from here on. Tap-only: the dead state must HOLD
+	# indefinitely — 90 frames (1.5s, far past the old 0.6s timer)
+	# with no respawn, no trap reset, no deaths change.
 	var held_frames := 0
-	var retry_frame := -1
-	for f in range(120):
+	var still_dead := true
+	for f in range(90):
 		await physics_frame
 		if bool(runtime.get("dead")):
 			held_frames += 1
 		else:
+			still_dead = false
+			break
+	_check("e2: dead state holds 90 frames with no input (no auto-retry)",
+		still_dead and held_frames >= 90,
+		"held_frames=" + str(held_frames))
+	_check("e3: deaths stays 1 while held (no respawn, no re-death)",
+		int(runtime.get("deaths")) == 1 and int(game.get("deaths")) == 1)
+	# Now a real input edge must still retry, even after the long hold.
+	_send_key(KEY_ENTER)
+	var retry_frame := -1
+	for f in range(12):
+		await physics_frame
+		if not bool(runtime.get("dead")):
 			retry_frame = f + 1
 			break
-	_check("e2: dead state holds (no instant respawn)", held_frames >= 20,
-		"held_frames=" + str(held_frames))
-	_check("e3: 0.6s auto-retry respawns with no input", retry_frame > 0,
-		"retry_frame=" + str(retry_frame) + " (expect ~36 at 60fps)")
+	_send_key_release(KEY_ENTER)
+	_check("e4: input-edge retry respawns after the long hold",
+		retry_frame > 0, "retry_frame=" + str(retry_frame))
 	await physics_frame
 	await physics_frame
-	var spawn_centre := Vector2(70, 478)
-	_check("e4: auto-retry respawns at spawn, hero visible",
+	var spawn_centre := Vector2(70, 480.5)
+	_check("e5: retry after hold respawns at spawn, hero visible",
 		player.global_position.distance_to(spawn_centre) <= 2.0 and player.visible,
 		"pos=" + str(player.global_position))
 	var st := _traps_reset(n)
-	_check("e5: auto-retry resets traps", st["pillar_offset"] == 0.0
+	_check("e6: retry after hold resets traps", st["pillar_offset"] == 0.0
 		and not bool(st["pillar_dropped"]) and bool(st["pillar_hanging"])
 		and not bool(st["platform_falling"]) and absf(float(st["platform_dy"])) < 0.5,
 		"pillar_offset=" + str(st["pillar_offset"]) + " platform_dy=" + str(st["platform_dy"]))
-	_check("e6: deaths stays 1 after auto-retry", int(runtime.get("deaths")) == 1)
+	_check("e7: deaths stays 1 after retry", int(runtime.get("deaths")) == 1)
 	game.queue_free()
 	await physics_frame
 	await physics_frame

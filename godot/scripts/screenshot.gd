@@ -156,15 +156,22 @@ func _run() -> void:
 	# runtime timing code; one per timed archetype). First capture
 	# 1.0s; second capture at the per-pair time below. A 0-diff pair
 	# is INVALID.
-	# L056 D12S1V1 dashed: both dashed solid at 1.0s; at 3.3s both
-	#   OFF (fposmod(3.3-0.5,3.2)=2.8>=2.2; fposmod(3.3-1.0,3.0)=2.3>=2.0).
-	# L031 D07S1V1 periodic pillar: home (offset 0) at 1.0s; at 4.5s
-	#   offset 253.8px (cycle 3.5; hang 2.997 + drop 0.403, rising).
+	# L056 D12S2V1 dashed (installed v3 set; the old D12S1V1 periods
+	# 3.2/3.0 in this comment were STALE — the installed periods are
+	# 2.8/2.6, under which 3.3s is solid again, so the pair was
+	# pixel-identical): A period 2.8 phase 0 on 2.0, B period 2.6
+	# phase 0.5 on 1.8. At 1.0s both ON (dark); at 2.5s both OFF
+	# (fposmod(2.5,2.8)=2.5>=2.0; fposmod(2.0,2.6)=2.0>=1.8).
+	# L031 D07S2V1 periodic pillar (installed v3 set; old cycle-3.5
+	# math was STALE — installed period is 3.6, so 4.5s lands back at
+	# home): drop_dist 486, drop_speed 600 -> drop_time 0.81,
+	# hang_time 1.79. At 1.0s home (offset 0); at 2.5s dropping,
+	# offset 600*(2.5-1.79)=426px.
 	# L071 D15S1V1 mover: sine f=0.933 at 1.0s vs 0.067 at 2.6s
 	#   (period 2.4, dx 70 -> ~61px apart).
 	# L036 D08S1V1 swing saw: angle +5.77deg at 1.0s vs -5.97deg at
 	#   2.6s (arc 12deg, period 3.4).
-	var phase_pairs: Array = [["L056", 3.3], ["L031", 4.5], ["L071", 2.6], ["L036", 2.6]]
+	var phase_pairs: Array = [["L056", 2.5], ["L031", 2.5], ["L071", 2.6], ["L036", 2.6]]
 	for pair in phase_pairs:
 		var pair_id: String = pair[0]
 		var pair_t2: float = pair[1]
@@ -300,9 +307,17 @@ func _kill_player(game_inst: Node) -> bool:
 
 
 func _wait_retry(game_inst: Node) -> void:
+	# Tap-only retry (v1.0.4, no auto-retry timer): send a REAL input
+	# edge (ENTER key) and wait for the dead state to clear.
 	var runtime: Node = game_inst.get("runtime")
 	if runtime == null:
 		return
+	var ev := InputEventKey.new()
+	ev.pressed = true
+	ev.echo = false
+	ev.keycode = KEY_ENTER
+	ev.physical_keycode = KEY_ENTER
+	Input.parse_input_event(ev)
 	for f in range(90):
 		if not bool(runtime.get("dead")):
 			return
@@ -330,7 +345,8 @@ func _settle_and_capture(path: String, seconds: float) -> void:
 
 func _capture_now(path: String) -> void:
 	# Capture after a drawn frame, without a long settle: the death
-	# shot must land inside the 0.6s dead state.
+	# shot must land inside the dead state (tap-only: it holds until
+	# an input edge, so there is no timer to race).
 	await get_tree().process_frame
 	await get_tree().process_frame
 	await RenderingServer.frame_post_draw

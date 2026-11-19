@@ -48,11 +48,12 @@ func build_level(level: Dictionary, tuning: Dictionary) -> Node:
 	var deco_col := trap_col.lerp(bg_col, 0.55)
 	var pl: Dictionary = tuning.get("player", {})
 	var gravity := float(pl.get("gravity", 2200.0))
-	var bar_y := float(tuning.get("control_bar", {}).get("y", 580))
+	var floor_y := TTuning.FLOOR_Y
 	platforms = []
 	hazards = []
 	player = TTPlayer.new()
 	player.setup(tuning)
+	player.set_background(bg_col)
 	# Drawing only: keep the player above hazards (z 10), as before
 	# (it was added last); z-order only, no physics/behaviour change.
 	player.z_index = 20
@@ -88,7 +89,7 @@ func build_level(level: Dictionary, tuning: Dictionary) -> Node:
 			push_error("builder: unknown hazard type '" + htype + "' (hard error)")
 			continue
 		var node := TTHazard.new()
-		node.setup(h, trap_col, player, bar_y)
+		node.setup(h, trap_col, player, floor_y)
 		rt.add_child(node)
 		hazards.append(node)
 	rt.add_child(player)

@@ -9,7 +9,9 @@
 #   NO open_picker method exists (flat map, no door picker)
 #   locked-node tap is a no-op (level_index unchanged, no scene change)
 #   direct node tap sets TTState.level_index + opens that exact level
-#   HUD shows "LEVEL N" (level_number) at idx 0/12/214, incl. restart
+#   HUD shows the pixel-font level NUMBER (level_number) at idx 0/12/214, incl. restart
+#   pause + restart hidden + TAP TO RETRY shown during the dead state
+#   (input-edge retry respawns; tap-only, no auto-retry)
 #   win on a MID level (idx 12) returns to the map, completes the id,
 #   advances highest to 13, and the new map's current node is 13
 #   skip returns to the map, advances highest, never completes;
@@ -174,8 +176,45 @@ func _death_target(game: Node) -> Vector2:
 
 
 # Kill via a real hazard (teleport + hold until the runtime reports
-# dead), then wait for the auto-retry. Returns true on a real death.
-func _kill_once(game: Node) -> bool:
+# dead), then retry via a REAL input edge (tap-only, v1.0.4 — there is
+# no auto-retry timer any more). With retry=false the dead state is
+# left held so the caller can assert death-state visuals first.
+# Returns true on a real death (and a successful retry when asked).
+func _send_retry_key() -> void:
+	var ev := InputEventKey.new()
+	ev.pressed = true
+	ev.echo = false
+	ev.keycode = KEY_ENTER
+	ev.physical_keycode = KEY_ENTER
+	Input.parse_input_event(ev)
+
+
+func _wait_alive(game: Node, frames: int = 30) -> bool:
+	var runtime: Node = game.get("runtime")
+	if runtime == null:
+		return false
+	for f in range(frames):
+		await physics_frame
+		if not bool(runtime.get("dead")):
+			return true
+	return false
+
+
+func _death_prompt_visible(game: Node) -> bool:
+	for child in game.get_children():
+		if str(child.get("text")) == "TAP TO RETRY":
+			return bool(child.visible)
+	return false
+
+
+func _hud_button_visible(hud: Node, icon: String) -> Variant:
+	for child in hud.get_children():
+		if child is Control and str(child.get("icon")) == icon:
+			return bool(child.visible)
+	return null
+
+
+func _kill_once(game: Node, retry: bool = true) -> bool:
 	var player: Node2D = game.get("player")
 	var runtime: Node = game.get("runtime")
 	if player == null or runtime == null:
@@ -189,11 +228,10 @@ func _kill_once(game: Node) -> bool:
 			player.set("velocity", Vector2.ZERO)
 			await physics_frame
 			if bool(runtime.get("dead")):
-				for g in range(90):
-					await physics_frame
-					if not bool(runtime.get("dead")):
-						return true
-				return false
+				if not retry:
+					return true
+				_send_retry_key()
+				return await _wait_alive(game)
 	return false
 
 
@@ -298,7 +336,8 @@ func _run() -> void:
 	var all_labels: Array = []
 	_traverse(map_inst, all_labels)
 	for n in all_labels:
-		if n is Label and (n as Label).text == "Made by Ahmed" and (n as Control).position.y < 104.0:
+		# Pixel-font credit (TTPixelLabel, not a Label, since v1.0.4).
+		if str(n.get("text")) == "Made by Ahmed" and n is Node2D and (n as Node2D).position.y < 104.0:
 			header_ok = true
 	_check("map7: 'Made by Ahmed' visible in the map header", header_ok)
 	_check("map8: fresh fixture -> no node marked done", done_ok)
@@ -351,10 +390,14 @@ func _run() -> void:
 	await physics_frame
 	var last_node: Control = nodes[nodes.size() - 1]
 	var last_rect: Rect2 = last_node.get_global_rect()
-	var expected_max: float = maxf(0.0, content_h - 616.0)
+	# Viewport height comes from the scroll container itself (was a
+	# hardcoded 616.0; the map viewport moved to 608 high when its top
+	# moved 104 -> 112 to clear the header credit, so the max moved
+	# 2904 -> 2912 — the old constant failed the check, not the map).
+	var expected_max: float = maxf(0.0, content_h - float(scroll.size.y))
 	_check("scroll1: scroll_vertical=max -> last node reachable/visible",
 		absf(float(scroll.scroll_vertical) - expected_max) <= 1.0
-		and last_rect.position.y < 720.0 and last_rect.end.y > 104.0,
+		and last_rect.position.y < 720.0 and last_rect.end.y > float(scroll.position.y),
 		"scroll=" + str(scroll.scroll_vertical) + " max=" + str(expected_max)
 		+ " last_rect=" + str(last_rect))
 
@@ -363,10 +406,17 @@ func _run() -> void:
 	_click_control(nodes[12])
 	_check("tap1: direct node tap sets TTState.level_index to 12",
 		TTState.level_index == 12, "level_index=" + str(TTState.level_index))
-	await process_frame
-	await process_frame
-	await physics_frame
-	var game1: Node = current_scene
+	# The map->level transition awaits the 0.12s wipe cover before the
+	# scene change, so a fixed 2-frame wait races it (tap2 failed on
+	# the fixed wait even though the transition itself works — same
+	# wait-for-scene pattern _wait_for_map already uses below).
+	var game1: Node = null
+	for f in range(60):
+		await process_frame
+		var cur: Node = current_scene
+		if cur != null and cur.has_method("build_level"):
+			game1 = cur
+			break
 	_check("tap2: node tap transitions to the game scene",
 		game1 != null and game1.has_method("build_level"),
 		"current_scene=" + (str(game1) if game1 != null else "null"))
@@ -448,7 +498,11 @@ func _run() -> void:
 		var spawn_ok := false
 		if player1b != null:
 			var sp: Vector2 = game1.get("spawn_point")
-			spawn_ok = player1b.global_position.distance_to(sp + Vector2(0, -22)) <= 2.0
+			# Respawn offset is -ph/2 from the builder (level_builder
+			# line 62); ph is 39.0 in v3, so -19.5 — the old hardcoded
+			# -22 was the v2 hero height (44) and missed by 2.5px.
+			var ph: float = float(player1b.get("ph"))
+			spawn_ok = player1b.global_position.distance_to(sp + Vector2(0, -ph * 0.5)) <= 2.0
 		_check("pause6: restart unpauses, resets deaths, respawns at spawn",
 			paused == false and int(game1.get("deaths")) == 0 and spawn_ok,
 			"paused=" + str(paused) + " deaths=" + str(game1.get("deaths")))
@@ -581,11 +635,24 @@ func _run() -> void:
 		var hud2: Node = game2.get("hud")
 		_check("skip1: Skip hidden at 0 deaths",
 			hud2 != null and not bool(hud2.call("is_skip_visible")))
-		var k1 := await _kill_once(game2)
+		# Death-state visuals (v1.0.4): hold the FIRST death (no retry
+		# yet) and assert the HUD hides + the prompt shows, then retry
+		# via a real input edge.
+		var k1 := await _kill_once(game2, false)
 		await physics_frame
 		await physics_frame
-		_check("skip2: real death 1 lands, Skip still hidden",
-			k1 and int(game2.get("deaths")) == 1 and not bool(hud2.call("is_skip_visible")),
+		var pause_hid: Variant = _hud_button_visible(hud2, "pause") if hud2 != null else null
+		var restart_hid: Variant = _hud_button_visible(hud2, "restart") if hud2 != null else null
+		_check("skip0b: pause + restart HIDDEN during dead state, TAP TO RETRY shown",
+			k1 and pause_hid == false and restart_hid == false and _death_prompt_visible(game2),
+			"pause_visible=" + str(pause_hid) + " restart_visible=" + str(restart_hid)
+			+ " prompt=" + str(_death_prompt_visible(game2)))
+		_send_retry_key()
+		var alive0 := await _wait_alive(game2)
+		await physics_frame
+		await physics_frame
+		_check("skip2: real death 1 lands, input-edge retry respawns, Skip still hidden",
+			k1 and alive0 and int(game2.get("deaths")) == 1 and not bool(hud2.call("is_skip_visible")),
 			"deaths=" + str(game2.get("deaths")))
 		var k2 := await _kill_once(game2)
 		await physics_frame

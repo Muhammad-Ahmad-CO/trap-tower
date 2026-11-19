@@ -5,17 +5,21 @@ extends Node2D
 # fall death, door win. Exposes deaths / level_completed / dead for the
 # game node and the verifier.
 #
-# DEATH-FLOW CONTRACT (frozen): deaths increments SYNCHRONOUSLY inside
-# _die(), in the death frame — never at retry time. The dead state then
-# holds: hero hidden + player physics off, traps held visible (no
-# trap/platform reset until retry). Retry happens on an input edge
-# (key press / screen touch / mouse click, ignoring the death frame
-# itself) or on a 0.6s auto-retry timer (process_always, so it fires
-# even while paused). At retry the SAME player node respawns at spawn
-# and all trap/platform clocks reset, so retries are deterministic.
-# _physics_process early-returns while dead: no double-death, no win
-# check while dead. The autopilot ends its attempt on the deaths
-# increase and rebuilds, so the dead state never gates death detection.
+# DEATH-FLOW CONTRACT (frozen, LEVEL_SCHEMA.md v3): deaths increments
+# SYNCHRONOUSLY inside _die(), in the death frame — never at retry
+# time. The dead state then holds: hero hidden + player physics off,
+# traps held visible (no trap/platform reset until retry). Retry happens
+# on an input edge ONLY (key press / screen touch / mouse click,
+# ignoring the death frame itself) — TAP-ONLY, NO AUTO-RETRY. The
+# 0.6s auto-retry timer from v1.0.3 was REMOVED in v1.0.4 (Round 4,
+# Lane Vis decision): the frozen schema says "respawn on TAP (tap-only,
+# NO auto-retry)" and the timer contradicted it — a dead player must
+# wait for the player's tap, never respawn by itself. At retry the SAME
+# player node respawns at spawn and all trap/platform clocks reset, so
+# retries are deterministic. _physics_process early-returns while dead:
+# no double-death, no win check while dead. The autopilot ends its
+# attempt on the deaths increase and rebuilds, so the dead state never
+# gates death detection.
 
 var player: TTPlayer = null
 var platforms: Array = []
@@ -53,7 +57,7 @@ func _physics_process(_delta: float) -> void:
 		if h.kills(prect):
 			_die()
 			return
-	if player.feet_pos().y > 640.0:
+	if player.feet_pos().y > TTuning.FALL_DEATH_Y:
 		_die()
 		return
 	if door != null and prect.intersects(door.door_rect()):
@@ -92,17 +96,7 @@ func _die() -> void:
 		player.visible = false
 		player.set_physics_process(false)
 	# Traps/platforms are deliberately NOT reset here: they stay held
-	# visible until retry. The timer is process_always so the retry
-	# still fires if the tree is paused mid-death.
-	var gen := _death_gen
-	var timer := get_tree().create_timer(0.6, true, false, false)
-	timer.timeout.connect(_on_auto_retry.bind(gen))
-
-
-func _on_auto_retry(gen: int) -> void:
-	if not dead or gen != _death_gen:
-		return
-	_retry()
+	# visible until retry. No auto-retry timer (tap-only, see contract).
 
 
 func _retry() -> void:

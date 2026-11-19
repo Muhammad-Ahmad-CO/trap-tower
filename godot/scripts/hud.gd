@@ -1,34 +1,44 @@
 class_name TTHUD
 extends Node2D
 
-# In-game HUD. Top-centre: the level indicator, text "LEVEL N"
-# (1-based; the game passes the level number at setup). Top-left: pause +
-# restart icon buttons. Top-right: "SKIP >>", visible ONLY when deaths
-# in the current level reach 3 (game pushes deaths per frame; the HUD
-# owns no save state). HUD buttons live at y 16..64, far above the
-# control bar (y 580..720), so hit-testing never double-fires with it.
-# The HUD root is PROCESS_MODE_ALWAYS so its buttons stay clickable
-# while the tree is paused; children inherit that mode.
+# In-game HUD (LEVEL_SCHEMA.md v3). Top-centre: the level indicator —
+# a SMALL pixel-font level NUMBER (e.g. `37`), yellow on a small
+# dark-red chip. The number is the ONLY top-centre element. No squares,
+# no other counters. Top-left: pause + restart icon buttons. Top-right:
+# "SKIP >>", visible ONLY when deaths in the current level reach 3
+# (game pushes deaths per frame; the HUD owns no save state).
+# HUD accent colours (dark-red + yellow) are FIXED code constants,
+# independent of the level palette, and never clash with any palette
+# (proven on gold palettes, the v1.0.3 contrast minor). During the death
+# state set_dead(true) hides pause + restart (+ skip): only the
+# top-centre indicator stays. The HUD root is PROCESS_MODE_ALWAYS so
+# its buttons stay clickable while the tree is paused; children
+# inherit that mode.
 
 signal pause_pressed
 signal restart_pressed
 signal skip_pressed
 
+# Fixed HUD accents (schema: independent of the level palette).
+const HUD_DARK_RED := Color(0.43, 0.04, 0.04)
+const HUD_YELLOW := Color(1.0, 0.824, 0.247)
 
-# One small reusable icon/text button. Code-drawn (no text needed for
-# icons; `text` draws a centred label instead of an icon). Used by the
-# HUD, the pause panel (game.gd) and the map wrench (map.gd) via
-# TTHUD.IconButton. Press-mode (default): fires on press. Release-mode
-# (activate_on_release, for buttons inside a ScrollContainer): fires on
-# release inside the rect after a press that did not drag, and never
-# accepts the press event so the scroll container can still scroll.
+
+# One small reusable icon/text button. Code-drawn (icons drawn as
+# shapes; `text` draws a centred pixel-font label instead of an icon).
+# Used by the HUD, the pause panel (game.gd) and the map wrench
+# (map.gd) via TTHUD.IconButton. Press-mode (default): fires on press.
+# Release-mode (activate_on_release, for buttons inside a
+# ScrollContainer): fires on release inside the rect after a press
+# that did not drag, and never accepts the press event so the scroll
+# container can still scroll.
 class IconButton extends Control:
 	signal pressed
 
 	var icon := ""
 	var text := ""
-	var fill := Color(0.17, 0.04, 0.54)
-	var icon_col := Color.WHITE
+	var fill := TTHUD.HUD_DARK_RED
+	var icon_col := TTHUD.HUD_YELLOW
 	var font_size := 30
 	var corner_radius := 10
 	var activate_on_release := false
@@ -72,9 +82,9 @@ class IconButton extends Control:
 		sb.set_corner_radius_all(corner_radius)
 		draw_style_box(sb, Rect2(Vector2.ZERO, size))
 		if text != "":
-			var font := get_theme_default_font()
-			var y := size.y * 0.5 + float(font_size) * 0.36
-			draw_string(font, Vector2(0, y), text, HORIZONTAL_ALIGNMENT_CENTER, size.x, font_size, icon_col)
+			var px := maxi(3, int(font_size / 5.0))
+			var ty := (size.y - float(TTPixelFont.GLYPH_H * px)) * 0.5
+			TTPixelFont.draw_text(self, text, Vector2(0, ty), px, icon_col, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 		elif icon != "":
 			_draw_icon(icon)
 
@@ -133,47 +143,45 @@ class IconButton extends Control:
 
 
 var level_number := 1
-var trap_col := Color.WHITE
-var bg_col := Color.WHITE
 var _deaths := 0
+var _pause_btn: IconButton = null
+var _restart_btn: IconButton = null
 var _skip_btn: IconButton = null
+var _dead := false
 
 
 func _init() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 
 
-func setup(pal: Dictionary, p_level_number: int) -> void:
+func setup(_pal: Dictionary, p_level_number: int) -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	trap_col = TTuning.col(str(pal.get("trap", "#2B0A8A")))
-	bg_col = TTuning.col(str(pal.get("bg", "#FFFFFF")))
 	level_number = p_level_number
 	# Drawing only: HUD renders above all level art.
 	z_index = 100
-	var yellow := Color.html("FFD23F")
-	var pause_btn := IconButton.new()
-	pause_btn.icon = "pause"
-	pause_btn.fill = trap_col
-	pause_btn.icon_col = yellow
-	pause_btn.position = Vector2(16, 16)
-	pause_btn.size = Vector2(48, 48)
-	pause_btn.pressed.connect(_on_pause_btn)
-	add_child(pause_btn)
-	var restart_btn := IconButton.new()
-	restart_btn.icon = "restart"
-	restart_btn.fill = trap_col
-	restart_btn.icon_col = yellow
-	restart_btn.position = Vector2(76, 16)
-	restart_btn.size = Vector2(48, 48)
-	restart_btn.pressed.connect(_on_restart_btn)
-	add_child(restart_btn)
+	_pause_btn = IconButton.new()
+	_pause_btn.icon = "pause"
+	_pause_btn.fill = HUD_DARK_RED
+	_pause_btn.icon_col = HUD_YELLOW
+	_pause_btn.position = Vector2(16, 16)
+	_pause_btn.size = Vector2(48, 48)
+	_pause_btn.pressed.connect(_on_pause_btn)
+	add_child(_pause_btn)
+	_restart_btn = IconButton.new()
+	_restart_btn.icon = "restart"
+	_restart_btn.fill = HUD_DARK_RED
+	_restart_btn.icon_col = HUD_YELLOW
+	_restart_btn.position = Vector2(76, 16)
+	_restart_btn.size = Vector2(48, 48)
+	_restart_btn.pressed.connect(_on_restart_btn)
+	add_child(_restart_btn)
 	_skip_btn = IconButton.new()
 	_skip_btn.text = "SKIP >>"
-	_skip_btn.font_size = 26
-	_skip_btn.fill = trap_col
-	_skip_btn.icon_col = yellow
-	_skip_btn.position = Vector2(1114, 16)
-	_skip_btn.size = Vector2(150, 48)
+	_skip_btn.font_size = 22
+	_skip_btn.fill = HUD_DARK_RED
+	_skip_btn.icon_col = HUD_YELLOW
+	_skip_btn.position = Vector2(1024, 16)
+	_skip_btn.size = Vector2(240, 48)
 	_skip_btn.visible = false
 	_skip_btn.pressed.connect(_on_skip_btn)
 	add_child(_skip_btn)
@@ -183,12 +191,33 @@ func set_deaths(death_count: int) -> void:
 	if death_count == _deaths:
 		return
 	_deaths = death_count
+	_refresh_skip()
+
+
+func _refresh_skip() -> void:
 	if _skip_btn != null:
-		_skip_btn.visible = _deaths >= 3
+		_skip_btn.visible = (not _dead) and _deaths >= 3
 
 
 func is_skip_visible() -> bool:
 	return _skip_btn != null and _skip_btn.visible
+
+
+# Death state: pause + restart (+ skip) hidden; only the top-centre
+# level indicator stays. Called every physics frame by the game node.
+func set_dead(is_dead: bool) -> void:
+	if is_dead == _dead:
+		return
+	_dead = is_dead
+	if _pause_btn != null:
+		_pause_btn.visible = not _dead
+	if _restart_btn != null:
+		_restart_btn.visible = not _dead
+	_refresh_skip()
+
+
+func is_dead_hidden() -> bool:
+	return _dead
 
 
 func _on_pause_btn() -> void:
@@ -204,18 +233,19 @@ func _on_skip_btn() -> void:
 
 
 func _draw() -> void:
-	var text := "LEVEL %d" % level_number
-	# Node2D has no theme: the fallback font is the only font source.
-	var font := ThemeDB.fallback_font
-	var font_size := 34
-	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-	var pad := 16.0
-	var top := 18.0
-	var band_h := 34.0
-	# Opaque backing behind the text span, drawn first: level art
-	# passes behind the HUD instead of threading through the indicator
-	# row. Same background colour as the level background, so it is
-	# invisible except where it occludes level art. Drawing only.
-	draw_rect(Rect2((1280.0 - w) * 0.5 - pad, top, w + pad * 2.0, band_h), bg_col)
-	var baseline := top + band_h * 0.5 + float(font_size) * 0.36
-	draw_string(font, Vector2(0, baseline), text, HORIZONTAL_ALIGNMENT_CENTER, 1280.0, font_size, trap_col)
+	# Small pixel-font level NUMBER on a small dark-red chip,
+	# top-centre. Fixed accents: readable on every palette.
+	var text := str(level_number)
+	var px := 5
+	var tw := TTPixelFont.text_width(text, px)
+	var pad := 12.0
+	var chip_w := tw + pad * 2.0
+	var chip_h := 38.0
+	var top := 14.0
+	var x := (1280.0 - chip_w) * 0.5
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = HUD_DARK_RED
+	sb.set_corner_radius_all(8)
+	draw_style_box(sb, Rect2(x, top, chip_w, chip_h))
+	var ty := top + (chip_h - float(TTPixelFont.GLYPH_H * px)) * 0.5
+	TTPixelFont.draw_text(self, text, Vector2(x, ty), px, HUD_YELLOW, HORIZONTAL_ALIGNMENT_CENTER, chip_w)

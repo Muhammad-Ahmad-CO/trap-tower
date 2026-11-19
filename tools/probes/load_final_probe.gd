@@ -6,7 +6,7 @@
 # through TTBuilder and checks each build yields a runtime with a player,
 # platforms and hazards. Prints counts and exits 0 only if all 215 build.
 # Also asserts the checker<->runtime agreement: load_levels must return
-# ZERO visual-rule warnings on the final file, and schema_version == 2.
+# ZERO visual-rule warnings on the final file, and schema_version == 3.
 #
 # Usage:
 #   godot --headless --fixed-fps 60 --path <project> -s tools/probes/load_final_probe.gd
@@ -41,14 +41,14 @@ func _run() -> void:
 		print("LOAD FINAL FAIL: ", warnings.size(), " visual-rule warning(s) on the final file (checker/runtime drift)")
 		quit(1)
 		return
-	# Schema version on the raw file: must be 2 (v2 contract).
+	# Schema version on the raw file: must be 3 (v3 contract).
 	var raw_text0 := FileAccess.get_file_as_string("res://data/levels.json")
 	var parsed0: Variant = JSON.parse_string(raw_text0)
-	if typeof(parsed0) != TYPE_DICTIONARY or int((parsed0 as Dictionary).get("schema_version", -1)) != 2:
-		print("LOAD FINAL FAIL: schema_version != 2 on the final file")
+	if typeof(parsed0) != TYPE_DICTIONARY or int((parsed0 as Dictionary).get("schema_version", -1)) != 3:
+		print("LOAD FINAL FAIL: schema_version != 3 on the final file")
 		quit(1)
 		return
-	print("LOAD FINAL: schema_version=2 OK, warnings=0 OK")
+	print("LOAD FINAL: schema_version=3 OK, warnings=0 OK")
 	# validate_file a second time on the raw parsed JSON (independent path).
 	var raw_text := FileAccess.get_file_as_string("res://data/levels.json")
 	var parsed: Variant = JSON.parse_string(raw_text)

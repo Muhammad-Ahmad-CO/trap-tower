@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Trap Tower static level verifier (Lane B).
 
-Implements LEVEL_SCHEMA.md v2 (FROZEN) exactly. Loads
+Implements LEVEL_SCHEMA.md v3 (FROZEN) exactly. Loads
 godot/data/levels.json + godot/data/tuning.json and checks:
 
   (a) schema/tuning versions, required fields, unknown kind/type = hard error
-  (b) geometry bounds (0..1280 / 0..580), platform w/h minima
+      (`dotted_line` is an unknown type in v3 and hard-errors)
+  (b) geometry bounds (0..1280 / 90..720), platform w/h minima;
+      floor = bottom at y=720 (FLOOR_Y = viewport.height)
   (c) spawn/door safe zones (40px) + standing on solid ground
   (d) platform-graph reachability from spawn to door using the FROZEN
-      harness envelope from tuning.json (rise/gap/landing/run-up),
-      with per-edge reasoning; conservative pre-filter only. PLUS
+      schema envelope (rise <= 45, gap <= 80, landing >= 48,
+      run-up >= 24), with per-edge reasoning; conservative
+      pre-filter only. PLUS
       connectivity: flood-fill of empty space (8px grid, 4-connected)
       from spawn to door with solid platforms as walls -- the graph
       alone cannot see solid walls sealing a route.
@@ -20,30 +23,77 @@ godot/data/levels.json + godot/data/tuning.json and checks:
       are distinct only if signatures differ AND >= 2 of {layout
       geometry, trap set/params, solution path} differ; every
       duplicate cluster is reported.
-  (g) GROUNDING (rule 7): no floating geometry -- solid fixpoint,
-      shaft-flanked/resting specials, seated spikes, saw disc touch
-      over the full sweep, swing pivots inside grounded beams.
-      Rect hazards (spikes, spiked_column) must not area-overlap
-      solid rects beyond the 4px seating tolerance (saws,
-      hanging_pillar, dotted_line exempt).
+  (g) GROUNDING (rule 7): no floating geometry -- solid fixpoint
+      (floor = bottom at y=720), shaft-flanked/resting specials,
+      seated spikes, saw disc touch over the full sweep, swing
+      pivots inside grounded beams. Rect hazards (spikes,
+      spiked_column) must not area-overlap solid rects beyond the
+      4px seating tolerance (saws and hanging_pillar exempt).
   (h) HUD KEEP-OUT (rule 8): no drawn extent in y < 90; spawn feet
       y >= 134; door base y >= 174.
   (i) DENSITY FLOOR (rule 9): >= 2 solid rects in the middle band
-      y 150..450 with combined width >= 160px, PLUS a core-middle
-      floor: excluding edge-touching rects, >= 2 rects (solid
-      platforms AND/OR decorations, counted together)
-      intersecting y 260..420 with combined width >= 160px.
+      y 170..550 with combined width >= 160px, PLUS a core-middle
+      floor: >= 2 rects (solid platforms AND/OR decorations,
+      counted together) intersecting y 310..510 with combined
+      width >= 160px. Floor slabs (rects touching y=720 and
+      spanning >= 50% of the width) and edge walls (x == 0 or
+      x + w == 1280) are EXCLUDED from both counts. The checker
+      ALSO reports a report-only mass metric (solid area fraction
+      + per-column solid coverage) for every level; there is NO
+      hard mass threshold.
+  (k) HAZARD-FAMILY PURITY (rule 11): saw hazards appear ONLY in
+      saw-family archetypes (D03, D08, D09, D10, D33, D37, D41)
+      and mix/final archetypes (D26, D42, D43, D44). Spike-family
+      archetypes carry spikes, pits, and pillars only -- no saws.
+      Archetype is read from the `variation` field (D{nn}S{V}V{v});
+      levels without that provenance pattern are not family-checked.
+
+  Archetype -> family table (rule 11; the generator publishes the
+  same table -- the checker enforces it):
+    saw-family (saws allowed): D03 saw-runs, D08 swing-saws,
+      D09 patrol-saws, D10 gap-saws, D33 saw-fields,
+      D37 saw-corridors, D41 final-tower-saws.
+    mix/final (saws allowed): D26 grand-mixes, D42 final-skyline,
+      D43 final-reversed, D44 final-mega.
+    spike-family (NO saws; spikes/pits/pillars only): D01 pitfall,
+      D02 spike-hops, D04 popup-spikes, D05 triggered-spikes,
+      D06 triggered-pillars, D07 periodic-pillars,
+      D11 spiked-columns, D12 dashed-chains, D13 falling-floors,
+      D14 tilting-blocks, D15 moving-bridges, D16 mover-chains,
+      D17 ceiling-spikes, D18 wall-spikes, D19 step-climbs,
+      D20 double-gaps, D21 pit-bridges, D22 gauntlets,
+      D23 timed-mixes, D24 pillar-alleys, D25 pillar-forests,
+      D27 mover-lifts, D28 tower-descents, D29 reversed-runs,
+      D30 skyline-city, D31 drop-shafts, D32 zigzag-descents,
+      D34 trigger-pits, D35 spike-forests, D36 ceiling-gauntlets,
+      D38 timed-corridors, D39 dashed-towers, D40 column-forests.
   (j) DECORATIONS (rule 10): the optional `decorations` array, if
       present, must satisfy the attachment chain, HUD keep-out,
       no-hazard/spawn/door-overlap, and bounds rules (error prefix
       `deco:`). Decorations are ignored by reachability,
       connectivity, and dedupe signatures.
+  (l) Round 4, Rule 12 (chained-pair window floor, harness only) +
+      column span test: a spiked column is passable only if the
+      span test passes (w + 15 <= max_jump_dist *
+      sqrt(1 - h/apex), using the checker's THEORETICAL tuning
+      values) AND a takeoff exists whose flight lands past the
+      column, with the takeoff ground extending under the takeoff
+      point. Chained dir-up strip pairs (same platform, gap <
+      97.2px game-true air distance) fail unless W_chain >= 15px
+      (D14 clean floor); decoupled pairs (g + w2 > 97.2) are
+      judged as single strips.
 
-Physics/envelope/viewport/door/palette numbers are ALWAYS loaded from
-tuning.json -- never duplicated here by hand. The only numeric
-constants in this file come from LEVEL_SCHEMA.md itself (safe zone
-40px, ground tolerance 4px, platform h >= 16, saw radius 26..60,
-timing minima), each cited where defined.
+Physics/viewport/palette numbers are loaded from tuning.json. The
+door size (36x54), the harness envelope (rise 45 / gap 80 /
+landing 48 / run-up 24 / window 0.7s), and FLOOR_Y (720 =
+viewport.height) are SCHEMA CONSTANTS from LEVEL_SCHEMA.md v3 and
+are defined here -- the tuning.json `control_bar` and `door`
+entries are DEPRECATED and MUST NOT be read (grep tripwire proves
+zero reads). The tuning.json `harness_envelope` entry is likewise
+NOT read: the frozen v3 envelope lives in this file. Other numeric
+constants come from LEVEL_SCHEMA.md itself (safe zone 40px, ground
+tolerance 4px, platform h >= 16, saw radius 18..40, timing minima),
+each cited where defined.
 
 Exit codes: 0 = all levels pass; 1 = one or more levels fail;
 2 = usage / unreadable input / top-level structural failure.
@@ -64,7 +114,7 @@ from collections import Counter, deque
 from pathlib import Path
 
 # --- Constants from LEVEL_SCHEMA.md (not in tuning.json) -------------------
-SCHEMA_VERSION = 2          # LEVEL_SCHEMA.md: top-level schema_version
+SCHEMA_VERSION = 3          # LEVEL_SCHEMA.md v3: top-level schema_version
 SAFE_ZONE = 40.0            # LEVEL_SCHEMA.md: spawn/door safe zone, px
 GROUND_TOL = 4.0            # LEVEL_SCHEMA.md: platform top within 4px
 HUD_KEEPOUT_Y = 90.0        # LEVEL_SCHEMA.md rule 8: no drawn extent y < 90
@@ -72,12 +122,12 @@ SPAWN_MIN_Y = 134.0         # LEVEL_SCHEMA.md rule 8: spawn feet y >= 134
 DOOR_MIN_Y = 174.0          # LEVEL_SCHEMA.md rule 8: door base y >= 174
 MIN_PILLAR_W = 48.0         # LEVEL_SCHEMA.md rule 7: pillar w >= 48
 SHAFT_FLANK_GAP = 8.0       # LEVEL_SCHEMA.md rule 7: shaft columns <= 8px
-DENSITY_BAND_TOP = 150.0    # LEVEL_SCHEMA.md rule 9: middle band y 150..450
-DENSITY_BAND_BOTTOM = 450.0
+DENSITY_BAND_TOP = 170.0    # LEVEL_SCHEMA.md v3 rule 9: middle band y 170..550
+DENSITY_BAND_BOTTOM = 550.0
 DENSITY_MIN_RECTS = 2       # LEVEL_SCHEMA.md rule 9: >= 2 solid rects
 DENSITY_MIN_WIDTH = 160.0   # LEVEL_SCHEMA.md rule 9: combined width >= 160
-CORE_BAND_TOP = 260.0       # LEVEL_SCHEMA.md rule 9: core-middle y 260..420
-CORE_BAND_BOTTOM = 420.0
+CORE_BAND_TOP = 310.0       # LEVEL_SCHEMA.md v3 rule 9: core-middle y 310..510
+CORE_BAND_BOTTOM = 510.0
 CORE_MIN_RECTS = 2          # LEVEL_SCHEMA.md rule 9: >= 2 non-edge rects
 CORE_MIN_WIDTH = 160.0      # LEVEL_SCHEMA.md rule 9: combined width >= 160
 OVERLAP_TOL = 4.0           # LEVEL_SCHEMA.md rule 7: seating tolerance
@@ -86,7 +136,7 @@ DECO_MIN_H = 16.0           # LEVEL_SCHEMA.md Decorations: h >= 16
 DECO_ATTACH_TOL = 4.0       # LEVEL_SCHEMA.md rule 10: edge-adjacent
                             # within 4px counts as attached
 MIN_PLATFORM_H = 16.0       # LEVEL_SCHEMA.md: platform h >= 16
-SAW_R_MIN, SAW_R_MAX = 26.0, 60.0   # LEVEL_SCHEMA.md: saw r 26..60
+SAW_R_MIN, SAW_R_MAX = 18.0, 40.0   # LEVEL_SCHEMA.md v3: saw r 18..40
 DASHED_MIN_ON = 0.9         # LEVEL_SCHEMA.md: dashed on_time >= 0.9
 DASHED_MIN_OFF = 0.5        # LEVEL_SCHEMA.md: period - on_time >= 0.5
 FALL_MIN_STAND = 0.45       # LEVEL_SCHEMA.md: falling/tilting stand_time
@@ -95,12 +145,54 @@ MIN_DELAY = 0.25            # LEVEL_SCHEMA.md: trigger delay >= 0.25
 PILLAR_RISE_TIME = 1.0      # LEVEL_SCHEMA.md: periodic pillar rises over 1.0s
 DEFAULT_DROP_SPEED = 700.0  # LEVEL_SCHEMA.md: drop_speed default 700 px/s
 CONNECTIVITY_CELL = 8.0     # LEVEL_SCHEMA.md rule 5: 8px flood-fill grid
-HERO_RECT_W = 24.0          # LEVEL_SCHEMA.md rule 5: hero rect at spawn
-HERO_RECT_H = 44.0          # LEVEL_SCHEMA.md rule 5: hero rect at spawn
+HERO_RECT_W = 15.0          # LEVEL_SCHEMA.md v3: hero collision ~15x39
+HERO_RECT_H = 39.0          # (defaults; connectivity uses tuning player size)
+DOOR_W = 36.0               # LEVEL_SCHEMA.md v3 Door: SCHEMA CONSTANT 36x54
+DOOR_H = 54.0               # (tuning.json `door` entry is DEPRECATED)
+# Frozen v3 harness envelope (LEVEL_SCHEMA.md rule 5): measured probe
+# values x 0.85, Lead-frozen. NOT read from tuning.json.
+ENVELOPE_MAX_RISE = 45.0
+ENVELOPE_MAX_GAP = 80.0
+ENVELOPE_MIN_LANDING = 48.0
+ENVELOPE_MIN_RUNUP = 24.0
+ENVELOPE_MIN_WINDOW = 0.7
+# Max clearable up-spike strip width (Round 3, pilot-gate-r2 §8A):
+# engine-measured clearance window 84.7px minus hero half-width 7.5px
+# (x2) gives max clearable flat-ground strip ~69.7px; the cap is set
+# at 60px so a strip is jumpable with margin. Any wider up-strip is
+# physically unjumpable however it is timed or seated.
+MAX_UP_SPIKE_W = 60.0
+# Round 4, Rule 12 (new harness-only rule; LEVEL_SCHEMA.md v3 Rule 12
+# is additive documentation -- no version bump): chained-pair window
+# floor. Game-true air distance D = 97.2px (reconciled in
+# verification/air-distance-reconciliation-r4.json: forced takeoff
+# 154.8 -> landing 252.00; the planner's 93.15px hand-derivation is
+# retired). Single-strip takeoff window width = 69.7 - w (engine
+# probe; the discrete trajectory gives 69.55 - w, a 0.15px difference
+# that flips no clean/marginal call). For two dir-up strips on the
+# SAME platform with gap g < D, the chained window is
+#   W_chain = min(69.7-w1, 69.7-w2, g-27.5, 166.9-w1-w2-g)
+# (the four binding cases of W = W1 n ((L n W2) - D); the gap table
+# is recorded in verification/pilot-census-r4.json). A pair is
+# CHAINED only when the earliest landing after clearing the first
+# strip is already at/past the second strip's takeoff window
+# (g + w2 <= D): otherwise the hero lands before the window opens
+# and runs in, and the pair is decoupled (each strip judged singly
+# -- e.g. D02S3 50+50/g70, g+w2 = 120 > 97.2). A chained pair FAILS
+# unless W_chain >= 15 (the D14 clean floor, not the 4.05px lattice
+# floor). A 60+60 pair can never pass: W_chain <= 69.7-60 = 9.7.
+CHAIN_MIN_WINDOW = 15.0
+CHAIN_DECOUPLE_GAP = 97.2   # game-true air distance D (see above)
+CHAIN_WINDOW_CONST = 69.7   # single-strip window constant (probe)
+FLOOR_SLAB_MIN_WIDTH_FRAC = 0.5  # rule 9: slab spans >= 50% of width
+MASS_GRID_CELL = 8.0        # mass-metric grid (report-only, rule 9)
 
 PLATFORM_KINDS = {"solid", "dashed", "falling", "tilting", "moving"}
-HAZARD_TYPES = {"spikes", "saw", "spiked_column", "hanging_pillar",
-                "dotted_line"}
+# v3: `dotted_line` REMOVED -- any occurrence is an unknown type.
+HAZARD_TYPES = {"spikes", "saw", "spiked_column", "hanging_pillar"}
+# Rule 11: archetype numbers allowed to carry saws (saw-family +
+# mix/final). All other archetypes are spike-family (no saws).
+SAW_FAMILY = frozenset({3, 8, 9, 10, 26, 33, 37, 41, 42, 43, 44})
 SPIKE_DIRS = {"up", "down", "left", "right"}
 LEVEL_FIELDS = {"id", "palette", "spawn", "door", "platforms", "hazards",
                 "template", "variation"}
@@ -144,17 +236,109 @@ def qb(v, size):
     return int(math.floor(float(v) / size))
 
 
+def chain_window(w1, w2, g):
+    """Chained-pair takeoff window width (px) for two dir-up strips
+    of widths w1, w2 with edge-to-edge gap g on flat ground, D=97.2.
+    The four terms are the binding cases of W = W1 n ((L n W2) - D):
+    W1 width, W2 width, landing-zone width (g-27.5), and the reach
+    term (D + 69.7 - w1 - w2 - g). Only meaningful for a CHAINED
+    pair (g + w2 <= D); decoupled pairs are not chain-tested."""
+    return min(CHAIN_WINDOW_CONST - w1, CHAIN_WINDOW_CONST - w2,
+               g - 27.5, 166.9 - w1 - w2 - g)
+
+
+def column_span_clearable(w, h, tun):
+    """Round 4 column span test (Implementation Gate §7a): a spiked
+    column of width w protruding h px above the walking surface is
+    crossable only if the hero's rect (w + 15) fits inside the
+    at-height span: tun.max_jump_dist * sqrt(1 - h/tun.apex).
+    Uses the checker's THEORETICAL tuning values (conservative vs
+    the engine: max_jump_dist 89.07, apex 52.24 -- NOT the measured
+    97.2/57). Reference values: 56x40 -> 71 > 43.1 FAIL; 26x36 ->
+    41 <= 49.6 PASS; 36x40 -> 51 > 43.1 FAIL."""
+    if h > ENVELOPE_MAX_RISE:
+        return False
+    if h < 0.0:
+        return True
+    return (w + HERO_RECT_W
+            <= tun.max_jump_dist
+            * math.sqrt(max(0.0, 1.0 - h / tun.apex)))
+
+
+def trajectory_offsets(tun):
+    """Discrete jump-trajectory vertical offsets (px, feet-relative),
+    replicating _plan_trajectory/_plan_flight with the checker's
+    theoretical tuning values (jump_v, gravity, max_fall_speed).
+    Frame f advances run_speed/60 px horizontally (4.05px/frame)."""
+    dt = 1.0 / 60.0
+    max_fall = float(tun.raw.get("player", {}).get("max_fall_speed", 600.0))
+    offs = []
+    off = 0.0
+    v = float(tun.jump_v)
+    for f in range(90):
+        if f > 0:
+            v = min(v + float(tun.gravity) * dt, max_fall)
+        off += v * dt
+        offs.append(off)
+        if off > 220.0:
+            break
+    return offs
+
+
+def span_at_height(h, tun):
+    """(x_lo, x_hi, width): takeoff-relative x-range (px) where the
+    discrete trajectory's rise is >= h. Reference values (frozen
+    tuning): span(0) = (4.05, 93.12, 89.07), span(10) =
+    (4.28, 88.84, 84.55), span(36) = (18.33, 74.79, 56.46),
+    span(40) = (21.14, 71.98, 50.84)."""
+    step = float(tun.run_speed) / 60.0
+    offs = trajectory_offsets(tun)
+    idx = [i for i, o in enumerate(offs) if -o >= h]
+    if not idx:
+        return (0.0, 0.0, 0.0)
+    first, last = idx[0], idx[-1]
+    if first == 0:
+        x_lo = step
+    else:
+        r0 = -offs[first - 1]
+        r1 = -offs[first]
+        x_lo = first * step + ((h - r0) / max(0.001, r1 - r0)) * step
+    if last >= len(offs) - 1:
+        x_hi = (last + 1) * step
+    else:
+        ra = -offs[last]
+        rb = -offs[last + 1]
+        x_hi = (last + 1) * step + ((ra - h) / max(0.001, ra - rb)) * step
+    return (x_lo, x_hi, x_hi - x_lo)
+
+
+def column_takeoff_window(col_x, col_w, h, direction, tun):
+    """Feet-x takeoff interval for jumping OVER a column whose near
+    edge is col_x, width col_w, protruding h px above the takeoff
+    ground. direction +1: hero travels right (takeoff left of the
+    column); -1: travels left (takeoff right of it). The interval
+    guarantees the hero's rect is above the column top while
+    overlapping it AND lands past the column. Returns (lo, hi);
+    empty when lo > hi."""
+    x_lo, x_hi, _w = span_at_height(h, tun)
+    hw = HERO_RECT_W / 2.0
+    if direction >= 0:
+        return (col_x + col_w + hw - x_hi, col_x - hw - x_lo)
+    return (col_x + col_w + hw + x_lo, col_x - hw + x_hi)
+
+
 def _xy(point):
     if isinstance(point, dict):
         return float(point["x"]), float(point["y"])
     return float(point[0]), float(point[1])
 
 
-def connectivity_error(platforms, spawn, door, width, bar_y,
-                       door_w, door_h):
-    """Rule 5 connectivity (LEVEL_SCHEMA.md v2): flood-fill of empty
-    space on an 8px grid over width x bar_y, 4-connected, from the
-    hero rect at spawn to the door rect. A cell is blocked iff it
+def connectivity_error(platforms, spawn, door, width, floor_y,
+                       door_w, door_h, hero_w=HERO_RECT_W,
+                       hero_h=HERO_RECT_H):
+    """Rule 5 connectivity (LEVEL_SCHEMA.md v3): flood-fill of empty
+    space on an 8px grid over width x floor_y (720), 4-connected,
+    from the hero rect at spawn to the door rect. A cell is blocked iff it
     intersects a `solid` platform rect; dashed/falling/tilting/moving
     platforms and all hazards are OPEN. Returns an error string
     (prefix `connectivity:`) or None. Necessary for traversability,
@@ -169,7 +353,7 @@ def connectivity_error(platforms, spawn, door, width, bar_y,
         return None
     cell = CONNECTIVITY_CELL
     cols = max(1, int(math.ceil(float(width) / cell)))
-    rows = max(1, int(math.ceil(float(bar_y) / cell)))
+    rows = max(1, int(math.ceil(float(floor_y) / cell)))
     blocked = bytearray(cols * rows)
 
     def _span(lo, size, limit):
@@ -200,8 +384,8 @@ def connectivity_error(platforms, spawn, door, width, bar_y,
                     out.append((cx, cy))
         return out
 
-    seeds = _open_cells(sx - HERO_RECT_W / 2.0, sy - HERO_RECT_H,
-                        HERO_RECT_W, HERO_RECT_H)
+    seeds = _open_cells(sx - float(hero_w) / 2.0, sy - float(hero_h),
+                        float(hero_w), float(hero_h))
     if not seeds:
         return ("connectivity: no open cell at spawn (hero rect "
                 "fully blocked by solid)")
@@ -239,23 +423,26 @@ class Tuning:
         vp = data["viewport"]
         self.width = float(vp["width"])
         self.height = float(vp["height"])
-        self.bar_y = float(data["control_bar"]["y"])
-        self.bar_h = float(data["control_bar"]["height"])
-        env = data["harness_envelope"]
-        self.max_rise = float(env["max_rise"])
-        self.max_gap = float(env["max_gap"])
-        self.min_landing = float(env["min_landing_width"])
-        self.min_runup = float(env["min_runup"])
-        self.min_window = float(env["min_safe_window"])
+        # FLOOR_Y = viewport.height (720). The tuning.json
+        # `control_bar` entry is DEPRECATED and never read here.
+        self.floor_y = float(vp["height"])
+        # Frozen v3 envelope: schema constants, NOT tuning.json
+        # `harness_envelope` (which still holds stale v2 values).
+        self.max_rise = ENVELOPE_MAX_RISE
+        self.max_gap = ENVELOPE_MAX_GAP
+        self.min_landing = ENVELOPE_MIN_LANDING
+        self.min_runup = ENVELOPE_MIN_RUNUP
+        self.min_window = ENVELOPE_MIN_WINDOW
         pl = data["player"]
         self.gravity = float(pl["gravity"])
         self.jump_v = float(pl["jump_velocity"])
         self.run_speed = float(pl["run_speed"])
         self.player_w = float(pl["width"])
         self.player_h = float(pl["height"])
-        door = data["door"]
-        self.door_w = float(door["width"])
-        self.door_h = float(door["height"])
+        # Door size: SCHEMA CONSTANT 36x54. The tuning.json `door`
+        # entry (54x84) is DEPRECATED and never read here.
+        self.door_w = DOOR_W
+        self.door_h = DOOR_H
         self.n_palettes = len(data["palettes"])
         # Theoretical jump apex from frozen physics (for arc reasoning).
         self.apex = (self.jump_v ** 2) / (2.0 * self.gravity)
@@ -351,6 +538,10 @@ def popup_up_at(h, t):
 
 def pillar_state_at(h, t, tun, floor_y):
     """Periodic hanging pillar: (rect, lethal) at absolute time t.
+    Drop distance is to FLOOR_Y (720): drop_dist = max(0, floor_y -
+    (y + h)); drop_time = drop_dist / drop_speed; hang_time =
+    period - drop_time - 1.0s rise. SAME arithmetic as
+    hazard_node.gd / autopilot.gd (verified by code-reading).
 
     Cycle: hang (solid, not lethal) -> drop at drop_speed -> rise over
     1.0s (lethal while falling/rising). Triggered pillars are handled
@@ -556,19 +747,11 @@ class LevelCheck:
                 self._num_field(h, "phase", where, minimum=0.0)
             if "drop_speed" in h:
                 self._num_field(h, "drop_speed", where, minimum=1.0)
-        elif htype == "dotted_line":
-            linked = h.get("linked")
-            if not isinstance(linked, int) or isinstance(linked, bool) \
-                    or not (0 <= linked < len(self.lv["hazards"])):
-                self.errors.append("%s: linked %r is not a valid hazard index"
-                                   % (where, linked))
-            elif linked == i:
-                self.errors.append("%s: linked to itself" % where)
 
     # -- (b) geometry bounds ----------------------------------------------
     def check_bounds(self):
         tun = self.tun
-        W, H = tun.width, tun.bar_y
+        W, H = tun.width, tun.floor_y
         for i, p in enumerate(self.lv["platforms"]):
             if not all(is_num(p.get(k)) for k in ("x", "y", "w", "h")):
                 continue
@@ -709,7 +892,7 @@ class LevelCheck:
         pillar-connected, or both-ends-touching. A support must itself
         be grounded, so floating stacks never ground each other."""
         plats = self.lv["platforms"]
-        bar_y = self.tun.bar_y
+        floor_y = self.tun.floor_y
         grounded = set()
         changed = True
         while changed:
@@ -719,7 +902,7 @@ class LevelCheck:
                         or plats[i].get("kind") != "solid":
                     continue
                 bottom = r[1] + r[3]
-                ok = abs(bottom - bar_y) <= GROUND_TOL
+                ok = abs(bottom - floor_y) <= GROUND_TOL
                 if not ok:
                     ok = self._resting_on(r, rects, grounded)
                 if not ok:
@@ -829,7 +1012,7 @@ class LevelCheck:
                        and plats[j].get("kind") == "solid"]
         for i, h in enumerate(self.lv["hazards"]):
             t = h.get("type")
-            if t in ("hanging_pillar", "dotted_line"):
+            if t == "hanging_pillar":
                 continue  # exempt from grounding by the schema
             if not all(is_num(h.get(k)) for k in ("x", "y", "w", "h")):
                 continue
@@ -870,7 +1053,7 @@ class LevelCheck:
                 r = (float(h["x"]), float(h["y"]), float(h["w"]),
                      float(h["h"]))
                 bottom, top = r[1] + r[3], r[1]
-                on_top = abs(bottom - self.tun.bar_y) <= GROUND_TOL \
+                on_top = abs(bottom - self.tun.floor_y) <= GROUND_TOL \
                     or any(abs(bottom - s[1]) <= GROUND_TOL
                            and self._x_overlap(r, s) >= 8.0
                            for s in solid_rects)
@@ -885,13 +1068,96 @@ class LevelCheck:
                         "grounding: hazards[%d] spiked_column unsupported "
                         "(needs solid top/floor or grounded beam)" % i)
 
+    def check_spike_strip_cap(self):
+        """Round 3 cap (pilot-gate-r2 §8A): no dir-up spikes strip may
+        be wider than MAX_UP_SPIKE_W. Minimal predicate -- no seating
+        or path test: timing (trigger/period) does not exempt a strip,
+        and down/left/right spikes are excluded (they are not jumped
+        over on flat ground). Boundary: w <= 60 passes, w >= 61 fails.
+        """
+        for i, h in enumerate(self.lv.get("hazards", [])):
+            if not isinstance(h, dict):
+                continue
+            if h.get("type") != "spikes":
+                continue
+            if h.get("dir", "up") != "up":
+                continue
+            if not is_num(h.get("w")):
+                continue
+            w = float(h["w"])
+            if w > MAX_UP_SPIKE_W:
+                self.errors.append(
+                    "spike-strip: hazards[%d] up-spikes w=%g > 60 "
+                    "(max clearable ~69.7px; pilot-gate-r2 §8)" % (i, w))
+
+    def check_chained_pairs(self):
+        """Rule 12 (Round 4, harness only): chained-pair window floor.
+        For any two dir-up spikes strips on the SAME platform with
+        edge-to-edge gap g < 97.2 (game-true air distance D), if the
+        pair is CHAINED (the earliest landing after clearing the
+        first strip is already at/past the second strip's takeoff
+        window: g + w2 <= D), the chained window W_chain must be
+        >= 15px (D14 clean floor). Decoupled pairs (g + w2 > D:
+        the hero lands before the second window opens and runs in)
+        are judged as single strips. A 60+60 pair can never pass:
+        W_chain <= 69.7-60 = 9.7 < 15 at any gap."""
+        ups = []
+        for i, h in enumerate(self.lv.get("hazards", [])):
+            if not isinstance(h, dict):
+                continue
+            if h.get("type") != "spikes" or h.get("dir", "up") != "up":
+                continue
+            if not all(is_num(h.get(k)) for k in ("x", "y", "w", "h")):
+                continue
+            ups.append((float(h["y"]) + float(h["h"]), float(h["x"]),
+                        float(h["w"]), i))
+        if len(ups) < 2:
+            return
+        # Seat each strip on its platform (same platform index =
+        # same ground). Unseated strips fall back to grouping by
+        # bottom y (grounding reports them separately).
+        plats = self.lv.get("platforms", [])
+
+        def seat_key(u):
+            bottom, x, w, _i = u
+            cx = x + w / 2.0
+            for j, p in enumerate(plats):
+                if not isinstance(p, dict):
+                    continue
+                if abs(float(p["y"]) - bottom) <= GROUND_TOL \
+                        and float(p["x"]) <= cx \
+                        <= float(p["x"]) + float(p["w"]):
+                    return ("plat", j)
+            return ("bottom", round(bottom, 1))
+
+        groups = {}
+        for u in ups:
+            groups.setdefault(seat_key(u), []).append(u)
+        for key in sorted(groups, key=str):
+            row = sorted(groups[key], key=lambda t: t[1])
+            for a, b in zip(row, row[1:]):
+                _ba, x1, w1, i1 = a
+                _bb, x2, w2, i2 = b
+                g = x2 - (x1 + w1)
+                if g >= CHAIN_DECOUPLE_GAP:
+                    continue
+                if g + w2 > CHAIN_DECOUPLE_GAP:
+                    continue  # decoupled: lands before W2, runs in
+                w_chain = chain_window(w1, w2, g)
+                if w_chain < CHAIN_MIN_WINDOW:
+                    self.errors.append(
+                        "chained-pair: hazards[%d]+hazards[%d] up-strips "
+                        "w=%g+%g gap=%g -> W_chain=%.2f < 15 "
+                        "(clean floor; chained: g+w2=%g <= 97.2)"
+                        % (i1, i2, w1, w2, g, w_chain, g + w2))
+
     # -- (b3b) hazard/solid area-overlap (rule 7) ------------------------
     def check_hazard_solid_overlap(self):
         """Rect hazards must not area-overlap solid rects beyond the
         4px seating tolerance: an intersection with width > 4 AND
-        height > 4 fails. Saws (disc geometry), hanging_pillar (beam
-        mounts) and dotted_line (indicators) are exempt. Harness
-        only; the runtime does not check this."""
+        height > 4 fails. Saws (disc geometry) and hanging_pillar
+        (beam mounts) are exempt. Harness only; the runtime does
+        not check this."""
         rects = self._rects()
         plats = self.lv["platforms"]
         solids = [(j, rects[j]) for j in range(len(rects))
@@ -916,6 +1182,55 @@ class LevelCheck:
                     break
 
     # -- (b4) density floor (rule 9) --------------------------------------
+    def _is_floor_slab(self, r):
+        """Rule 9 exclusion: rect touches y=720 and spans >= 50% of
+        the width. Such slabs must not satisfy the bands by
+        themselves."""
+        return abs(r[1] + r[3] - self.tun.floor_y) <= GROUND_TOL \
+            and r[2] >= FLOOR_SLAB_MIN_WIDTH_FRAC * self.tun.width
+
+    def _is_edge_wall(self, r):
+        """Rule 9 exclusion: rect touches the left or right edge."""
+        return r[0] == 0.0 or r[0] + r[2] == self.tun.width
+
+    def _counts_for_bands(self, r):
+        return not self._is_floor_slab(r) and not self._is_edge_wall(r)
+
+    def _mass_metric(self, rects):
+        """Report-only mass metric (rule 9): solid area fraction +
+        per-column solid coverage over the play area (0..1280 /
+        90..720) on an 8px grid. NO hard threshold -- silhouette is
+        judged eyes-on against the reference frames."""
+        cell = MASS_GRID_CELL
+        cols = max(1, int(math.ceil(self.tun.width / cell)))
+        top = HUD_KEEPOUT_Y
+        rows = max(1, int(math.ceil((self.tun.floor_y - top) / cell)))
+        covered = bytearray(cols * rows)
+        for i, r in enumerate(rects):
+            if r is None \
+                    or self.lv["platforms"][i].get("kind") != "solid":
+                continue
+            cx0 = max(0, int(r[0] // cell))
+            cx1 = min(cols - 1, int((r[0] + r[2] - 1e-9) // cell))
+            cy0 = max(0, int((r[1] - top) // cell))
+            cy1 = min(rows - 1, int((r[1] + r[3] - top - 1e-9) // cell))
+            for cy in range(cy0, cy1 + 1):
+                base = cy * cols
+                for cx in range(cx0, cx1 + 1):
+                    covered[base + cx] = 1
+        total = cols * rows
+        solid_cells = sum(covered)
+        col_fracs = []
+        for cx in range(cols):
+            col_fracs.append(sum(covered[cy * cols + cx]
+                                 for cy in range(rows)) / float(rows))
+        return {"solid_area_fraction": solid_cells / float(total),
+                "mean_column_coverage": sum(col_fracs) / float(cols),
+                "columns_with_solid_frac": sum(
+                    1 for f in col_fracs if f > 0) / float(cols),
+                "columns_half_covered_frac": sum(
+                    1 for f in col_fracs if f >= 0.5) / float(cols)}
+
     def check_density_floor(self):
         rects = self._rects()
         count = 0
@@ -925,27 +1240,26 @@ class LevelCheck:
         for i, r in enumerate(rects):
             if r is None or self.lv["platforms"][i].get("kind") != "solid":
                 continue
+            if not self._counts_for_bands(r):
+                continue
             if r[1] < DENSITY_BAND_BOTTOM \
                     and r[1] + r[3] > DENSITY_BAND_TOP:
                 count += 1
                 width += r[2]
-            # Core-middle floor: edge-touching rects (the edge walls)
-            # do not count; only interior structure fills the middle.
-            if r[0] != 0.0 and r[0] + r[2] != self.tun.width \
-                    and r[1] < CORE_BAND_BOTTOM \
+            if r[1] < CORE_BAND_BOTTOM \
                     and r[1] + r[3] > CORE_BAND_TOP:
                 core_count += 1
                 core_width += r[2]
         # Core-middle floor, decorations half (rules 9 + 10):
-        # decoration rects count TOGETHER with solid rects. The
-        # y150..450 floor above stays solid-only. Malformed deco
-        # entries are reported by check_decorations and skipped
-        # here, never counted.
+        # decoration rects count TOGETHER with solid rects, under
+        # the SAME floor-slab / edge-wall exclusions. The middle
+        # floor above stays solid-only. Malformed deco entries are
+        # reported by check_decorations and skipped here, never
+        # counted.
         for d in self._deco_rects():
-            if d is None:
+            if d is None or not self._counts_for_bands(d):
                 continue
-            if d[0] != 0.0 and d[0] + d[2] != self.tun.width \
-                    and d[1] < CORE_BAND_BOTTOM \
+            if d[1] < CORE_BAND_BOTTOM \
                     and d[1] + d[3] > CORE_BAND_TOP:
                 core_count += 1
                 core_width += d[2]
@@ -957,18 +1271,19 @@ class LevelCheck:
                         "hazard_count": hz, "pass": ok and core_ok,
                         "core_rect_count": core_count,
                         "core_combined_width": core_width,
-                        "core_pass": core_ok}
+                        "core_pass": core_ok,
+                        "mass": self._mass_metric(rects)}
         if not ok:
             self.errors.append(
                 "density: only %d solid rect(s) in middle band "
-                "y150..450, combined width %g (need >= %d rects "
-                "and width >= %g)"
+                "y170..550, combined width %g (need >= %d rects "
+                "and width >= %g; floor slabs and edge walls excluded)"
                 % (count, width, DENSITY_MIN_RECTS, DENSITY_MIN_WIDTH))
         if not core_ok:
             self.errors.append(
-                "core-middle: only %d non-edge solid/decoration "
-                "rect(s) intersecting y260..420, combined width %g "
-                "(need >= %d rects and width >= %g)"
+                "core-middle: only %d non-edge, non-slab solid/"
+                "decoration rect(s) intersecting y310..510, combined "
+                "width %g (need >= %d rects and width >= %g)"
                 % (core_count, core_width, CORE_MIN_RECTS,
                    CORE_MIN_WIDTH))
 
@@ -1034,7 +1349,7 @@ class LevelCheck:
             self.errors.append("deco: decorations must be an array")
             return
         tun = self.tun
-        W, H = tun.width, tun.bar_y
+        W, H = tun.width, tun.floor_y
         rects = self._deco_rects()
         for i, r in enumerate(rects):
             if r is None:
@@ -1125,8 +1440,8 @@ class LevelCheck:
                 tun.door_w, tun.door_h)
 
     def lethal_hazards(self):
-        """All hazards except dotted_line (visual warning only)."""
-        return [h for h in self.lv["hazards"] if h.get("type") != "dotted_line"]
+        """All hazards are lethal in v3 (no warning-only types)."""
+        return list(self.lv["hazards"])
 
     # -- (c) safe zones + ground ------------------------------------------
     def hazard_near_point(self, px, py):
@@ -1274,8 +1589,6 @@ class LevelCheck:
         out = []
         for i, h in enumerate(self.lv["hazards"]):
             t = h.get("type")
-            if t == "dotted_line":
-                continue
             touch = False
             if t == "saw" and ("path" in h or "swing" in h):
                 bb = saw_swept_bbox(h)
@@ -1289,7 +1602,7 @@ class LevelCheck:
             elif t == "hanging_pillar":
                 r = (float(h["x"]), float(h["y"]), float(h["w"]),
                      float(h["h"]))
-                fall_col = (r[0], r[1], r[2], self.tun.bar_y - r[1])
+                fall_col = (r[0], r[1], r[2], self.tun.floor_y - r[1])
                 touch = rects_overlap(fall_col, band) or any(
                     rects_overlap(fall_col, z) for z in zone_rects)
             elif "trigger_x" in h or "delay" in h:
@@ -1388,7 +1701,8 @@ class LevelCheck:
             r = (float(h["x"]), float(h["y"]), float(h["w"]), float(h["h"]))
             if not rects_overlap(r, band):
                 continue
-            if h.get("dir", "up") == "up" and self._ground_sitting_spikes(h):
+            if h.get("dir", "up") == "up" and self._ground_sitting_spikes(h) \
+                    and float(h["w"]) <= MAX_UP_SPIKE_W:
                 continue
             return None
         # Hanging pillars are solid at rest: one in the arc band blocks.
@@ -1476,8 +1790,6 @@ class LevelCheck:
         trig_time: absolute time the player's x first passed the hazard's
         trigger (None if never / no trigger)."""
         typ = h.get("type")
-        if typ == "dotted_line":
-            return False
         if "trigger_x" in h:
             if trig_time is None or t < trig_time + float(h.get("delay", 0.0)):
                 return False
@@ -1495,7 +1807,7 @@ class LevelCheck:
         if typ == "hanging_pillar":
             if "period" in h:
                 rect, lethal = pillar_state_at(h, t, self.tun,
-                                               self.tun.bar_y)
+                                               self.tun.floor_y)
                 # Hanging (solid) rect overlapping the player blocks too.
                 return rects_overlap(rect, prect)
             # Triggered: drops once the player passes drop_trigger_x.
@@ -1503,7 +1815,7 @@ class LevelCheck:
                 return False
             speed = float(h.get("drop_speed", DEFAULT_DROP_SPEED))
             x, y, w, hh = (float(h[k]) for k in ("x", "y", "w", "h"))
-            drop_dist = max(0.0, self.tun.bar_y - (y + hh))
+            drop_dist = max(0.0, self.tun.floor_y - (y + hh))
             dy = min(drop_dist, speed * max(0.0, t - trig_time))
             return rects_overlap((x, y + dy, w, hh), prect)
         return False
@@ -1724,8 +2036,6 @@ class LevelCheck:
                     tun.player_h)
             for hi, h in enumerate(lv["hazards"]):
                 t = h.get("type")
-                if t == "dotted_line":
-                    continue
                 # Static hazards on the walking band.
                 if t == "spikes" and "period" not in h \
                         and "trigger_x" not in h:
@@ -1733,8 +2043,15 @@ class LevelCheck:
                          float(h["h"]))
                     if rects_overlap(r, band):
                         if h.get("dir", "up") == "up" \
-                                and self._ground_sitting_spikes(h):
+                                and self._ground_sitting_spikes(h) \
+                                and float(h["w"]) <= MAX_UP_SPIKE_W:
                             notes.append("jumpable floor spikes on walk")
+                        elif h.get("dir", "up") == "up" \
+                                and self._ground_sitting_spikes(h):
+                            failures.append(
+                                "walking path on platforms[%d] blocked by "
+                                "static spikes hazards[%d] (strip w=%g > 60 "
+                                "unjumpable)" % (node, hi, float(h["w"])))
                         else:
                             failures.append(
                                 "walking path on platforms[%d] blocked by "
@@ -1743,14 +2060,43 @@ class LevelCheck:
                     r = (float(h["x"]), float(h["y"]), float(h["w"]),
                          float(h["h"]))
                     if rects_overlap(r, band):
-                        clearable = r[1] >= top - tun.max_rise \
-                            and r[2] <= tun.max_gap
-                        if clearable:
-                            notes.append("jumpable spiked column on walk")
-                        else:
+                        # Round 4 span test (Gate §7a) + takeoff-ground
+                        # test: the column is passable only if the
+                        # span test passes AND a takeoff exists whose
+                        # flight lands past the column, with the
+                        # takeoff ground (this platform) extending
+                        # under the takeoff point.
+                        h_above = top - r[1]
+                        direction = 1 if exit_x >= entry_x else -1
+                        win_lo, win_hi = column_takeoff_window(
+                            r[0], r[2], h_above, direction, tun)
+                        feet_lo = float(p["x"]) + HERO_RECT_W / 2.0
+                        feet_hi = (float(p["x"]) + float(p["w"])
+                                   - HERO_RECT_W / 2.0)
+                        ground_ok = win_lo <= feet_hi \
+                            and win_hi >= feet_lo
+                        if h_above <= 0.0:
+                            notes.append("spiked column below walking "
+                                         "band on walk")
+                        elif not column_span_clearable(r[2], h_above, tun):
                             failures.append(
                                 "walking path on platforms[%d] blocked by "
-                                "spiked_column hazards[%d]" % (node, hi))
+                                "spiked_column hazards[%d] (span test: "
+                                "w+15=%g > %.2f at h=%g)"
+                                % (node, hi, r[2] + HERO_RECT_W,
+                                   tun.max_jump_dist * math.sqrt(max(
+                                       0.0, 1.0 - h_above / tun.apex)),
+                                   h_above))
+                        elif not ground_ok:
+                            failures.append(
+                                "walking path on platforms[%d] blocked by "
+                                "spiked_column hazards[%d] (takeoff window "
+                                "[%.2f, %.2f] lies past platforms[%d] edge "
+                                "[%.2f, %.2f])"
+                                % (node, hi, win_lo, win_hi, node,
+                                   feet_lo, feet_hi))
+                        else:
+                            notes.append("jumpable spiked column on walk")
                 elif t == "saw" and "path" not in h and "swing" not in h:
                     if circle_rect_overlap(float(h["x"]), float(h["y"]),
                                            float(h["r"]), band):
@@ -1796,7 +2142,7 @@ class LevelCheck:
                 elif t == "hanging_pillar":
                     r = (float(h["x"]), float(h["y"]), float(h["w"]),
                          float(h["h"]))
-                    fall_col = (r[0], r[1], r[2], tun.bar_y - r[1])
+                    fall_col = (r[0], r[1], r[2], tun.floor_y - r[1])
                     timed_here = rects_overlap(fall_col, band)
                 elif "trigger_x" in h:
                     r = (float(h["x"]), float(h["y"]), float(h["w"]),
@@ -1830,8 +2176,9 @@ class LevelCheck:
     def check_connectivity(self):
         err = connectivity_error(
             self.lv.get("platforms", []), self.lv.get("spawn", {}),
-            self.lv.get("door", {}), self.tun.width, self.tun.bar_y,
-            self.tun.door_w, self.tun.door_h)
+            self.lv.get("door", {}), self.tun.width, self.tun.floor_y,
+            self.tun.door_w, self.tun.door_h,
+            self.tun.player_w, self.tun.player_h)
         if err is not None:
             self.errors.append(err)
 
@@ -1921,8 +2268,6 @@ class LevelCheck:
                                   qb(p["dy"], 16),
                                   round(float(p["period"]), 1)))
             for h in self.lv["hazards"]:
-                if h.get("type") == "dotted_line":
-                    continue  # warning only; derived from linked hazard
                 x = W - float(h["x"]) - float(h["w"]) if mirror \
                     else float(h["x"])
                 base = [h["type"], qb(x, 32), qb(h["y"], 32),
@@ -1989,6 +2334,28 @@ class LevelCheck:
         solution = min(solution_sig(False), solution_sig(True))
         return layout, traps, solution
 
+    # -- (k) hazard-family purity (rule 11) ---------------------------
+    def check_family_purity(self):
+        """Rule 11 (harness only): saws only in saw-family + mix/final
+        archetypes. Archetype comes from `variation` (D{nn}S{V}V{v});
+        levels without that provenance pattern are skipped."""
+        import re as _re
+        variation = self.lv.get("variation")
+        if not isinstance(variation, str):
+            return
+        m = _re.match(r"^D(\d{2})S[1-5]V\d+$", variation)
+        if not m:
+            return
+        archetype = int(m.group(1))
+        if archetype in SAW_FAMILY:
+            return
+        for i, h in enumerate(self.lv.get("hazards", [])):
+            if isinstance(h, dict) and h.get("type") == "saw":
+                self.errors.append(
+                    "family: hazards[%d] saw in spike-family archetype "
+                    "D%02d (rule 11: saws only in D03/D08/D09/D10/"
+                    "D33/D37/D41 + D26/D42/D43/D44)" % (i, archetype))
+
     def run(self, max_paths=300, with_connectivity=True):
         self.check_fields()
         if self.structural_ok:
@@ -1997,9 +2364,12 @@ class LevelCheck:
             for fn in (self.check_bounds,
                        self.check_hud_keepout,
                        self.check_grounding,
+                       self.check_spike_strip_cap,
+                       self.check_chained_pairs,
                        self.check_hazard_solid_overlap,
                        self.check_density_floor,
                        self.check_decorations,
+                       self.check_family_purity,
                        self.check_safe_zones_and_ground):
                 try:
                     fn()
@@ -2027,8 +2397,9 @@ def verify_levels(data, tun, max_paths=300):
     if not isinstance(data, dict):
         return [], [], ["top level is not an object"]
     if data.get("schema_version") != SCHEMA_VERSION:
-        top_errors.append("schema_version %r != frozen %d"
-                          % (data.get("schema_version"), SCHEMA_VERSION))
+        # Exact error string required by LEVEL_SCHEMA.md v3: a v2
+        # file MUST be rejected with `schema_version must be 3`.
+        top_errors.append("schema_version must be 3")
     if data.get("tuning_version") != tun.version:
         top_errors.append("tuning_version %r != tuning.json version %r"
                           % (data.get("tuning_version"), tun.version))
@@ -2133,6 +2504,26 @@ SELFTESTS = [
     ("positive_deco.json", True, None),
     ("positive_deco_connectivity.json", True, None),
     ("positive_no_decorations.json", True, None),
+    ("positive_floor_720.json", True, None),
+    ("negative_floor_580.json", False, "grounding"),
+    ("positive_door_size.json", True, None),
+    ("negative_envelope.json", False, "unreachable"),
+    ("positive_envelope.json", True, None),
+    ("negative_family_purity.json", False, "family"),
+    ("positive_family_purity.json", True, None),
+    ("negative_dotted_line.json", False, "unknown type"),
+    ("negative_floor_slab.json", False, "density"),
+    ("negative_schema_v2.json", False, "schema_version must be 3"),
+    ("positive_up_spike_60.json", True, None),
+    ("negative_up_spike_61.json", False, "spike-strip"),
+    ("negative_up_spike_70_triggered.json", False, "spike-strip"),
+    ("negative_up_spike_120.json", False, "spike-strip"),
+    ("negative_up_spike_overhang.json", False, "unreachable"),
+    ("positive_column_26x36.json", True, None),
+    ("negative_column_56x40.json", False, "spiked_column"),
+    ("positive_chained_pair_48.json", True, None),
+    ("negative_chained_pair_30.json", False, "chained-pair"),
+    ("negative_column_past_ground_edge.json", False, "spiked_column"),
 ]
 
 
@@ -2146,7 +2537,8 @@ def run_selftest(repo_root):
         data = json.loads((fix_dir / fname).read_text(encoding="utf-8"))
         results, clusters, top_errors = verify_levels(data, tun)
         all_pass = not top_errors and all(r["pass"] for r in results)
-        reasons = " ".join(e for r in results for e in r["errors"]).lower()
+        reasons = " ".join(top_errors + [e for r in results
+                                         for e in r["errors"]]).lower()
         if needle:
             good = (all_pass == expect_pass) and (needle in reasons)
         else:

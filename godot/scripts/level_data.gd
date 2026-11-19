@@ -1,7 +1,7 @@
 class_name TTLevelData
 extends RefCounted
 
-# Strict runtime validation of res://data/levels.json per LEVEL_SCHEMA.md v2.
+# Strict runtime validation of res://data/levels.json per LEVEL_SCHEMA.md v3.
 # Mirrors tools/check_levels.py rules 1-4: versions, fields, unknown
 # kind/type = hard error, bounds, safe zones, standing on solid ground.
 # Fail fast: any error returns a message; the Game scene refuses to load.
@@ -9,12 +9,12 @@ extends RefCounted
 # validate_visual_rules. They never block loading; the harness enforces
 # them hard. Rule 9 (density) is harness-only and is not checked here.
 
-const SCHEMA_VERSION := 2
+const SCHEMA_VERSION := 3
 const SAFE_ZONE := 40.0
 const GROUND_TOL := 4.0
 const MIN_PLATFORM_H := 16.0
-const SAW_R_MIN := 26.0
-const SAW_R_MAX := 60.0
+const SAW_R_MIN := 18.0
+const SAW_R_MAX := 40.0
 const DASHED_MIN_ON := 0.9
 const DASHED_MIN_OFF := 0.5
 const FALL_MIN_STAND := 0.45
@@ -28,7 +28,7 @@ const REST_OVERLAP := 48.0
 const SWING_SAMPLES := 13
 
 const PLATFORM_KINDS = ["solid", "dashed", "falling", "tilting", "moving"]
-const HAZARD_TYPES = ["spikes", "saw", "spiked_column", "hanging_pillar", "dotted_line"]
+const HAZARD_TYPES = ["spikes", "saw", "spiked_column", "hanging_pillar"]
 const SPIKE_DIRS = ["up", "down", "left", "right"]
 const STABLE_KINDS = ["solid", "moving"]
 
@@ -198,7 +198,7 @@ static func _validate_hazard(h: Variant, i: int, lv: Dictionary) -> String:
 			return e6
 		var r := float(h["r"])
 		if r < SAW_R_MIN or r > SAW_R_MAX:
-			return where + ": r outside 26..60"
+			return where + ": r outside 18..40"
 		var has_path: bool = h.has("path")
 		var has_swing: bool = h.has("swing")
 		if has_path and has_swing:
@@ -251,12 +251,11 @@ static func _validate_hazard(h: Variant, i: int, lv: Dictionary) -> String:
 static func _validate_geometry(lv: Dictionary, tuning: Dictionary) -> String:
 	var vp: Dictionary = tuning.get("viewport", {"width": 1280, "height": 720})
 	var W := float(vp.get("width", 1280))
-	var bar_y := float(tuning.get("control_bar", {}).get("y", 580))
+	var floor_y := TTuning.FLOOR_Y
 	var env: Dictionary = tuning.get("harness_envelope", {})
 	var min_landing := float(env.get("min_landing_width", 48))
-	var door_d: Dictionary = tuning.get("door", {})
-	var door_w := float(door_d.get("width", 54))
-	var door_h := float(door_d.get("height", 84))
+	var door_w := TTuning.DOOR_W
+	var door_h := TTuning.DOOR_H
 	var plats: Array = lv["platforms"]
 	for idx in range(plats.size()):
 		var p: Dictionary = plats[idx]
@@ -264,7 +263,7 @@ static func _validate_geometry(lv: Dictionary, tuning: Dictionary) -> String:
 		var y := float(p["y"])
 		var w := float(p["w"])
 		var h := float(p["h"])
-		if x < 0 or y < 0 or x + w > W or y + h > bar_y:
+		if x < 0 or y < 0 or x + w > W or y + h > floor_y:
 			return "platforms[%d] outside bounds" % idx
 		if w < min_landing:
 			return "platforms[%d] w < landing minimum" % idx
@@ -273,7 +272,7 @@ static func _validate_geometry(lv: Dictionary, tuning: Dictionary) -> String:
 		if str(p["kind"]) == "moving":
 			var x2 := x + float(p["dx"])
 			var y2 := y + float(p["dy"])
-			if x2 < 0 or y2 < 0 or x2 + w > W or y2 + h > bar_y:
+			if x2 < 0 or y2 < 0 or x2 + w > W or y2 + h > floor_y:
 				return "platforms[%d] moving end outside bounds" % idx
 	var hazards: Array = lv["hazards"]
 	for idx in range(hazards.size()):
@@ -282,31 +281,31 @@ static func _validate_geometry(lv: Dictionary, tuning: Dictionary) -> String:
 		if htype == "saw":
 			var cx := float(hz["x"])
 			var cy := float(hz["y"])
-			if cx < 0 or cx > W or cy < 0 or cy > bar_y:
+			if cx < 0 or cx > W or cy < 0 or cy > floor_y:
 				return "hazards[%d] saw centre outside bounds" % idx
 			if hz.has("path"):
 				var path: Dictionary = hz["path"]
-				if float(path["x2"]) < 0 or float(path["x2"]) > W or float(path["y2"]) < 0 or float(path["y2"]) > bar_y:
+				if float(path["x2"]) < 0 or float(path["x2"]) > W or float(path["y2"]) < 0 or float(path["y2"]) > floor_y:
 					return "hazards[%d] saw path end outside bounds" % idx
 			if hz.has("swing"):
 				var sw: Dictionary = hz["swing"]
-				if float(sw["pivot_x"]) < 0 or float(sw["pivot_x"]) > W or float(sw["pivot_y"]) < 0 or float(sw["pivot_y"]) > bar_y:
+				if float(sw["pivot_x"]) < 0 or float(sw["pivot_x"]) > W or float(sw["pivot_y"]) < 0 or float(sw["pivot_y"]) > floor_y:
 					return "hazards[%d] saw pivot outside bounds" % idx
 		else:
 			var hx := float(hz["x"])
 			var hy := float(hz["y"])
 			var hw := float(hz["w"])
 			var hh := float(hz["h"])
-			if hx < 0 or hy < 0 or hx + hw > W or hy + hh > bar_y:
+			if hx < 0 or hy < 0 or hx + hw > W or hy + hh > floor_y:
 				return "hazards[%d] outside bounds" % idx
 	var spawn: Dictionary = lv["spawn"]
 	var door: Dictionary = lv["door"]
 	var sx := float(spawn["x"])
 	var sy := float(spawn["y"])
-	if sx < 0 or sx > W or sy < 0 or sy > bar_y:
+	if sx < 0 or sx > W or sy < 0 or sy > floor_y:
 		return "spawn outside bounds"
 	var drect := Rect2(float(door["x"]) - door_w * 0.5, float(door["y"]) - door_h, door_w, door_h)
-	if drect.position.x < 0 or drect.position.y < 0 or drect.end.x > W or drect.end.y > bar_y:
+	if drect.position.x < 0 or drect.position.y < 0 or drect.end.x > W or drect.end.y > floor_y:
 		return "door rect outside bounds"
 	var near := _hazard_near_point(lv, sx, sy)
 	if near != "":
@@ -333,7 +332,7 @@ static func _validate_geometry(lv: Dictionary, tuning: Dictionary) -> String:
 
 
 # Warn-and-load visual rules 7 (grounding) and 8 (HUD keep-out) from
-# LEVEL_SCHEMA.md v2. Returns one string per violation, each naming the
+# LEVEL_SCHEMA.md v3. Returns one string per violation, each naming the
 # level id and the rule. Callers must run validate_level first: this
 # function assumes fields exist and geometry is in bounds. It mirrors
 # the checker's geometric predicates; deliberate simplifications where
@@ -350,7 +349,7 @@ static func _validate_geometry(lv: Dictionary, tuning: Dictionary) -> String:
 #   combined-overlap rule: one support with >= 48px overlap, or both
 #   end regions on supports totalling >= 48px (gap <= 4).
 # - Ends-touching has NO shape test (Lead decision, LEVEL_SCHEMA.md
-#   v2 rule 7): "vertical" means grounded-via-fixpoint. Any grounded
+#   v3 rule 7): "vertical" means grounded-via-fixpoint. Any grounded
 #   solid counts if the y-overlap is >= 8px.
 # - Pillar-connected follows the checker exactly: the pillar must
 #   itself be grounded (fixpoint), w >= 48, top touching the
@@ -369,10 +368,10 @@ static func _validate_geometry(lv: Dictionary, tuning: Dictionary) -> String:
 static func validate_visual_rules(lv: Dictionary, tuning: Dictionary) -> Array[String]:
 	var out: Array[String] = []
 	var id := str(lv.get("id", "?"))
-	var bar_y := float(tuning.get("control_bar", {}).get("y", 580))
+	var floor_y := TTuning.FLOOR_Y
 	var plats: Array = lv.get("platforms", [])
 	var hazards: Array = lv.get("hazards", [])
-	var grounded := _vis_grounded_flags(plats, bar_y)
+	var grounded := _vis_grounded_flags(plats, floor_y)
 	for i in range(plats.size()):
 		var p: Dictionary = plats[i]
 		var kind := str(p.get("kind", ""))
@@ -382,7 +381,7 @@ static func validate_visual_rules(lv: Dictionary, tuning: Dictionary) -> Array[S
 		elif not _vis_platform_supported(i, plats, grounded):
 			out.append("level %s rule 7: platforms[%d] %s is neither shaft-flanked nor resting" % [id, i, kind])
 	for i in range(hazards.size()):
-		_vis_check_hazard_grounding(hazards[i], i, plats, grounded, bar_y, id, out)
+		_vis_check_hazard_grounding(hazards[i], i, plats, grounded, floor_y, id, out)
 	# Rule 8: no drawn extent in y < 90; spawn feet >= 134; door >= 174.
 	var spawn: Dictionary = lv.get("spawn", {})
 	if float(spawn.get("y", 0)) < SPAWN_MIN_Y:
@@ -448,7 +447,7 @@ static func _vis_saw_centres(h: Dictionary) -> Array[Vector2]:
 # Fixpoint: a solid is grounded if it stands on the floor, rests on a
 # grounded solid, is pillar-connected to a grounded solid,
 # or has both ends touching grounded solids.
-static func _vis_grounded_flags(plats: Array, bar_y: float) -> Array:
+static func _vis_grounded_flags(plats: Array, floor_y: float) -> Array:
 	var grounded: Array = []
 	for i in range(plats.size()):
 		grounded.append(false)
@@ -460,7 +459,7 @@ static func _vis_grounded_flags(plats: Array, bar_y: float) -> Array:
 		for i in range(plats.size()):
 			if str(plats[i].get("kind", "")) != "solid" or grounded[i]:
 				continue
-			if _vis_solid_grounded(i, plats, grounded, bar_y):
+			if _vis_solid_grounded(i, plats, grounded, floor_y):
 				grounded[i] = true
 				changed = true
 	return grounded
@@ -494,9 +493,9 @@ static func _vis_resting_on(r: Rect2, plats: Array, grounded: Array) -> bool:
 	return left_ok and right_ok and total >= REST_OVERLAP
 
 
-static func _vis_solid_grounded(i: int, plats: Array, grounded: Array, bar_y: float) -> bool:
+static func _vis_solid_grounded(i: int, plats: Array, grounded: Array, floor_y: float) -> bool:
 	var r := _vis_rect(plats[i])
-	if absf(r.end.y - bar_y) <= GROUND_TOL:
+	if absf(r.end.y - floor_y) <= GROUND_TOL:
 		return true
 	if _vis_resting_on(r, plats, grounded):
 		return true
@@ -548,7 +547,7 @@ static func _vis_platform_supported(i: int, plats: Array, grounded: Array) -> bo
 	return left and right
 
 
-static func _vis_check_hazard_grounding(h: Dictionary, i: int, plats: Array, grounded: Array, bar_y: float, id: String, out: Array[String]) -> void:
+static func _vis_check_hazard_grounding(h: Dictionary, i: int, plats: Array, grounded: Array, floor_y: float, id: String, out: Array[String]) -> void:
 	var htype := str(h.get("type", ""))
 	if htype == "hanging_pillar" or htype == "dotted_line":
 		return
@@ -602,7 +601,7 @@ static func _vis_check_hazard_grounding(h: Dictionary, i: int, plats: Array, gro
 			if not inside:
 				out.append("level %s rule 7: hazards[%d] swing pivot is not inside a solid beam" % [id, i])
 	elif htype == "spiked_column":
-		var ok := absf(r.end.y - bar_y) <= GROUND_TOL
+		var ok := absf(r.end.y - floor_y) <= GROUND_TOL
 		for j in range(plats.size()):
 			if str(plats[j].get("kind", "")) != "solid":
 				continue

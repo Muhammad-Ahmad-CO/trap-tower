@@ -1,20 +1,30 @@
 class_name TTTouchControls
 extends Node2D
 
-# Control bar (y 580..720) in EVERY level: left arrow, right arrow, and a
-# LARGER jump button with a bold up arrow (never a house shape). Bar fill =
-# trap colour; button fill = bg colour; arrow = trap colour.
-# Multi-touch: each finger tracked by its InputEvent index; a button
-# releases when its finger drags off it or lifts. No stuck input.
+# Overlay controls (LEVEL_SCHEMA.md v3): THREE large transparent
+# OUTLINED chevrons overlaying the play area — NO solid bar, NO filled
+# buttons at rest. Left chevron, right chevron, and a LARGER up/roof
+# chevron for jump (never a house shape). Outline colour = the level's
+# LIGHT colour (the lighter of bg/trap); fill-on-press feedback.
+# Generous hitboxes (larger than the drawn outlines). Multi-touch:
+# each finger tracked by its InputEvent index; a button releases when
+# its finger drags off it or lifts. No stuck input.
 # Works standalone (default rects/colours) and via setup() from the game.
 
-var bar_y := 580.0
-var bar_col := Color.html("2B0A8A")
-var btn_col := Color.html("E8871E")
-var arrow_col := Color.html("2B0A8A")
-var left_rect := Rect2(60, 600, 130, 100)
-var right_rect := Rect2(220, 600, 130, 100)
-var jump_rect := Rect2(920, 600, 210, 100)
+# Drawn outline rects (logical 1280x720). Bottom corners, like the
+# reference: move chevrons bottom-left, jump chevron bottom-right
+# and larger.
+var left_rect := Rect2(150, 600, 180, 80)
+var right_rect := Rect2(360, 600, 180, 80)
+var jump_rect := Rect2(950, 590, 210, 90)
+# Generous hitboxes, larger than the drawn outlines (recomputed in
+# setup(); defaults match the standalone rects above).
+var left_hit := Rect2(128, 578, 224, 124)
+var right_hit := Rect2(338, 578, 224, 124)
+var jump_hit := Rect2(928, 568, 254, 134)
+
+var light_col := Color.html("E8871E")
+var dark_col := Color.html("2B0A8A")
 
 var _fingers := {}
 
@@ -29,21 +39,49 @@ var touch_jump: bool:
 		return _held("jump")
 
 
-func setup(tuning: Dictionary, pal: Dictionary) -> void:
-	bar_y = float(tuning.get("control_bar", {}).get("y", 580))
-	bar_col = TTuning.col(str(pal.get("trap", "#2B0A8A")))
-	btn_col = TTuning.col(str(pal.get("bg", "#E8871E")))
-	arrow_col = TTuning.col(str(pal.get("trap", "#2B0A8A")))
-	# Drawing only: control bar renders above all level art.
+func setup(_tuning: Dictionary, pal: Dictionary) -> void:
+	# Schema v3: the DEPRECATED tuning `control_bar` entry is never
+	# read. Colour = the lighter of the level's bg/trap.
+	var bg := TTuning.col(str(pal.get("bg", "#E8871E")))
+	var trap := TTuning.col(str(pal.get("trap", "#2B0A8A")))
+	if _luminance(bg) >= _luminance(trap):
+		light_col = bg
+		dark_col = trap
+	else:
+		light_col = trap
+		dark_col = bg
+	# Drawing only: controls render above all level art.
 	z_index = 100
-	var y := bar_y + 20.0
-	left_rect = Rect2(60, y, 130, 100)
-	right_rect = Rect2(220, y, 130, 100)
-	jump_rect = Rect2(920, y, 210, 100)
+	left_rect = Rect2(150, 600, 180, 80)
+	right_rect = Rect2(360, 600, 180, 80)
+	jump_rect = Rect2(950, 590, 210, 90)
+	_refresh_hits()
 	queue_redraw()
 
 
+func _refresh_hits() -> void:
+	left_hit = left_rect.grow(22.0)
+	right_hit = right_rect.grow(22.0)
+	jump_hit = jump_rect.grow(22.0)
+
+
+static func _luminance(c: Color) -> float:
+	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+
+
 func get_button_rect(button: String) -> Rect2:
+	# Hitboxes (generous): the touch test and the game inject at the
+	# hit-rect centre, which matches the drawn outline centre.
+	if button == "left":
+		return left_hit
+	if button == "right":
+		return right_hit
+	if button == "jump":
+		return jump_hit
+	return Rect2()
+
+
+func get_drawn_rect(button: String) -> Rect2:
 	if button == "left":
 		return left_rect
 	if button == "right":
@@ -65,11 +103,11 @@ func _held(button: String) -> bool:
 
 
 func _button_at(pos: Vector2) -> String:
-	if left_rect.has_point(pos):
+	if left_hit.has_point(pos):
 		return "left"
-	if right_rect.has_point(pos):
+	if right_hit.has_point(pos):
 		return "right"
-	if jump_rect.has_point(pos):
+	if jump_hit.has_point(pos):
 		return "jump"
 	return ""
 
@@ -111,29 +149,51 @@ func _to_local(screen_pos: Vector2) -> Vector2:
 
 
 func _draw() -> void:
-	draw_rect(Rect2(0, bar_y, 1280, 720.0 - bar_y), bar_col)
-	# 4px background-colour divider at the top edge of the control bar,
-	# spanning the full width, so ground and bar read as separate bands
-	# in palettes where platform colour == trap colour. btn_col is the
-	# background colour; button rects start 20px below bar_y, so this
-	# never overlaps a button. Drawing only.
-	draw_rect(Rect2(0, bar_y, 1280, 4), btn_col)
 	_draw_button(left_rect, "left")
 	_draw_button(right_rect, "right")
 	_draw_button(jump_rect, "jump")
 
 
+# One outlined chevron. Outline = light colour, 5px, transparent fill
+# at rest; fill-on-press fills the chevron with the light colour.
 func _draw_button(r: Rect2, button: String) -> void:
 	var pressed := _held(button)
-	var fill := arrow_col if pressed else btn_col
-	var ac := btn_col if pressed else arrow_col
-	draw_rect(r, fill)
 	var c := r.get_center()
 	var pts := PackedVector2Array()
 	if button == "left":
-		pts = PackedVector2Array([Vector2(c.x - 42, c.y), Vector2(c.x - 8, c.y - 30), Vector2(c.x - 8, c.y - 12), Vector2(c.x + 40, c.y - 12), Vector2(c.x + 40, c.y + 12), Vector2(c.x - 8, c.y + 12), Vector2(c.x - 8, c.y + 30)])
+		pts = PackedVector2Array([
+			Vector2(r.position.x, c.y),
+			Vector2(r.position.x + 34, r.position.y),
+			Vector2(r.end.x, r.position.y),
+			Vector2(r.end.x, r.end.y),
+			Vector2(r.position.x + 34, r.end.y),
+		])
 	elif button == "right":
-		pts = PackedVector2Array([Vector2(c.x + 42, c.y), Vector2(c.x + 8, c.y - 30), Vector2(c.x + 8, c.y - 12), Vector2(c.x - 40, c.y - 12), Vector2(c.x - 40, c.y + 12), Vector2(c.x + 8, c.y + 12), Vector2(c.x + 8, c.y + 30)])
+		pts = PackedVector2Array([
+			Vector2(r.end.x, c.y),
+			Vector2(r.end.x - 34, r.position.y),
+			Vector2(r.position.x, r.position.y),
+			Vector2(r.position.x, r.end.y),
+			Vector2(r.end.x - 34, r.end.y),
+		])
 	else:
-		pts = PackedVector2Array([Vector2(c.x, c.y - 38), Vector2(c.x + 34, c.y - 2), Vector2(c.x + 14, c.y - 2), Vector2(c.x + 14, c.y + 36), Vector2(c.x - 14, c.y + 36), Vector2(c.x - 14, c.y - 2), Vector2(c.x - 34, c.y - 2)])
-	draw_colored_polygon(pts, ac)
+		# Jump: wide low roof chevron, apex above the button centre.
+		pts = PackedVector2Array([
+			Vector2(c.x, c.y - 38),
+			Vector2(r.end.x, c.y + 6),
+			Vector2(r.end.x, r.end.y),
+			Vector2(r.position.x, r.end.y),
+			Vector2(r.position.x, c.y + 6),
+		])
+	if pressed:
+		draw_colored_polygon(pts, light_col)
+		var closed := pts + PackedVector2Array([pts[0]])
+		draw_polyline(closed, dark_col, 4.0, true)
+	else:
+		var closed2 := pts + PackedVector2Array([pts[0]])
+		# Dark edge behind the light outline (both palette colours):
+		# the chevron stays readable where it crosses light
+		# platforms on dark palettes, and on light backgrounds —
+		# the reference's chevrons carry the same soft dark edge.
+		draw_polyline(closed2, dark_col, 9.0, true)
+		draw_polyline(closed2, light_col, 5.0, true)

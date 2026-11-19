@@ -29,7 +29,7 @@ var swing_arc := 0.0
 var swing_period := 0.0
 var has_swing := false
 var linked := -1
-var bar_y := 580.0
+var floor_y := TTuning.FLOOR_Y
 
 var elapsed := 0.0
 var triggered := false
@@ -42,15 +42,18 @@ var pillar_offset := 0.0
 var pillar_dropped := false
 var pillar_hanging := true
 var _solid_shape: CollisionShape2D = null
+# Pop-out animation clock for triggered spikes: teeth scale from 0 to
+# full height over POP_TIME after the trigger activates (~0.1s, schema).
+const POP_TIME := 0.1
 
 
-func setup(d: Dictionary, color: Color, p_player: TTPlayer, p_bar_y: float) -> void:
+func setup(d: Dictionary, color: Color, p_player: TTPlayer, p_floor_y: float) -> void:
 	htype = str(d.get("type", "spikes"))
 	trap_col = color
 	# Drawing only: hazards render above platforms (z 0) and the door (z 1).
 	z_index = 10
 	player = p_player
-	bar_y = p_bar_y
+	floor_y = p_floor_y
 	rect = Rect2(float(d["x"]), float(d["y"]), float(d["w"]), float(d["h"]))
 	dir = str(d.get("dir", "up"))
 	radius = float(d.get("r", 30.0))
@@ -130,7 +133,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _update_pillar() -> void:
-	var drop_dist := maxf(0.0, bar_y - (pillar_home.y + rect.size.y))
+	var drop_dist := maxf(0.0, floor_y - (pillar_home.y + rect.size.y))
 	if has_drop_trigger:
 		if pillar_dropped:
 			pillar_offset = minf(drop_dist, drop_speed * maxf(0.0, elapsed - trigger_time))
@@ -182,8 +185,6 @@ func trigger_active() -> bool:
 
 
 func kills(prect: Rect2) -> bool:
-	if htype == "dotted_line":
-		return false
 	if not trigger_active():
 		return false
 	if htype == "spikes":
@@ -219,13 +220,21 @@ func _draw() -> void:
 		_draw_column()
 	elif htype == "hanging_pillar":
 		_draw_pillar()
-	elif htype == "dotted_line":
-		_draw_dotted()
 
 
 func _draw_spikes() -> void:
+	# Triggered teeth are INVISIBLE before they fire (schema: no
+	# trigger indicators of any kind). Once active they pop out from
+	# inside the solid FAST (~0.1s): teeth scale 0 -> full height.
+	if has_trigger and not trigger_active():
+		return
 	var up := popup_up()
 	var h_scale := 1.0 if up else 0.25
+	if has_trigger:
+		var pop := clampf((elapsed - trigger_time - delay) / POP_TIME, 0.0, 1.0)
+		h_scale *= pop
+		if h_scale <= 0.0:
+			return
 	var col := trap_col
 	if has_period and not up:
 		col = Color(trap_col.r, trap_col.g, trap_col.b, 0.45)
@@ -292,19 +301,3 @@ func _draw_pillar() -> void:
 		# drawn pixel enters the HUD band. Drawing only.
 		draw_line(Vector2(cx, 90), Vector2(cx, top), trap_col, 3.0)
 	draw_rect(Rect2(pillar_home.x, top, rect.size.x, rect.size.y), trap_col)
-
-
-func _draw_dotted() -> void:
-	var step := 14.0
-	if rect.size.x >= rect.size.y:
-		var y := rect.get_center().y
-		var x := rect.position.x + 4.0
-		while x <= rect.end.x:
-			draw_circle(Vector2(x, y), 3.0, trap_col)
-			x += step
-	else:
-		var x2 := rect.get_center().x
-		var y2 := rect.position.y + 4.0
-		while y2 <= rect.end.y:
-			draw_circle(Vector2(x2, y2), 3.0, trap_col)
-			y2 += step

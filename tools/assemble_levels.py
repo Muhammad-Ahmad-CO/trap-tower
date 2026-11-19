@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Trap Tower level assembler (Run 3, LEVEL_SCHEMA.md v2).
+"""Trap Tower level assembler (Round 1 pilot, LEVEL_SCHEMA.md v3).
 
 Joins a candidates file with an autopilot report by candidate ID and
-writes the shipped levels.json. Frozen assembly contract (v2 flat
+writes the shipped levels.json. Frozen assembly contract (v3 flat
 structure):
 
 - Candidate IDs ``D{archetype:02d}S{slot}V{variant}`` (e.g. D03S2V1);
@@ -45,7 +45,7 @@ from pathlib import Path
 
 ID_RE = re.compile(r"^D(\d{2})S([1-5])V(\d+)$")
 SLOTS_PER_DOOR = 5
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SPARE_DOOR = 44
 TARGET_SHIPPED = 215
 MIN_SHIPPED = 200
@@ -167,7 +167,7 @@ def main(argv=None):
                     % (len(missing), ", ".join(missing[:10])))
 
     # --- Select first passing variant per (archetype, slot) ------------
-    # v2 flat structure: incomplete archetypes contribute only their
+    # v3 flat structure: incomplete archetypes contribute only their
     # passing slots (no whole-door drop). D44 is the spare archetype:
     # its passing slots top the shipment up to 215, in slot order.
     grouped = {}      # (door, slot) -> [(variant, id)]

@@ -47,11 +47,16 @@ var touch_right := false
 var touch_jump := false
 var _win_delay := -1.0
 var _win_saved := false
+var _wipe_started := false
 var _error := false
 var _last_deaths := 0
 var _paused := false
 var _pause_overlay: Control = null
-var _death_label: Label = null
+var _death_label: TTPixelLabel = null
+var _death_burst: TTDeathParticles = null
+var _confetti: TTConfetti = null
+var _wipe: TTWipe = null
+var _hero_beat := -1.0
 
 
 func _ready() -> void:
@@ -86,6 +91,10 @@ func _build_from_dict(level: Dictionary, p_tuning: Dictionary, index: int) -> vo
 	controls = null
 	_pause_overlay = null
 	_death_label = null
+	_death_burst = null
+	_confetti = null
+	_wipe = null
+	_hero_beat = -1.0
 	_paused = false
 	var err := TTLevelData.validate_level(level, index, p_tuning)
 	if err != "":
@@ -119,6 +128,19 @@ func _build_from_dict(level: Dictionary, p_tuning: Dictionary, index: int) -> vo
 	add_child(controls)
 	_build_death_label()
 	_build_pause_overlay(pal)
+	_death_burst = TTDeathParticles.new()
+	add_child(_death_burst)
+	_confetti = TTConfetti.new()
+	add_child(_confetti)
+	# Original wipe reveal on level start (map -> level), then a brief
+	# hero-less beat before the hero appears (schema Hero section).
+	# Physics runs during the beat; only visibility is delayed.
+	_wipe = TTWipe.new()
+	add_child(_wipe)
+	_wipe.reveal()
+	if player != null:
+		player.visible = false
+		_hero_beat = 0.35
 	deaths = 0
 	_last_deaths = 0
 	level_completed = false
@@ -127,21 +149,22 @@ func _build_from_dict(level: Dictionary, p_tuning: Dictionary, index: int) -> vo
 	touch_jump = false
 	_win_delay = -1.0
 	_win_saved = false
+	_wipe_started = false
 
 
 func _build_death_label() -> void:
-	_death_label = Label.new()
+	# "TAP TO RETRY" in yellow pixel font, upper centre (~16% down
+	# the screen). Pixel font, not a Label (schema: ALL in-game text
+	# in the code-drawn pixel font).
+	_death_label = TTPixelLabel.new()
 	_death_label.text = "TAP TO RETRY"
-	_death_label.position = Vector2(0, 190)
-	_death_label.size = Vector2(1280, 60)
-	_death_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_death_label.add_theme_font_size_override("font_size", 44)
-	_death_label.add_theme_color_override("font_color", Color.html("FFD23F"))
-	_death_label.add_theme_color_override("font_outline_color", Color.html("0A1F44"))
-	_death_label.add_theme_constant_override("outline_size", 8)
-	_death_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_death_label.pixel_size = 5
+	_death_label.color = TTHUD.HUD_YELLOW
+	_death_label.align = HORIZONTAL_ALIGNMENT_CENTER
+	_death_label.width = 1280.0
+	_death_label.position = Vector2(0, 115)
 	# Above level art, below the pause overlay (90) and HUD (100):
-	# upper third, never overlapping the HUD buttons at y 16..64.
+	# upper centre, never overlapping the HUD buttons at y 16..64.
 	_death_label.z_index = 80
 	_death_label.visible = false
 	add_child(_death_label)
@@ -174,8 +197,8 @@ func _build_pause_overlay(pal: Dictionary) -> void:
 	for i in range(3):
 		var b := TTHUD.IconButton.new()
 		b.icon = icons[i]
-		b.fill = trap_col
-		b.icon_col = Color.html("FFD23F")
+		b.fill = TTHUD.HUD_DARK_RED
+		b.icon_col = TTHUD.HUD_YELLOW
 		b.position = Vector2(456 + i * 136, 312)
 		b.size = Vector2(96, 96)
 		b.corner_radius = 16
@@ -201,10 +224,17 @@ func _physics_process(_delta: float) -> void:
 	if deaths > _last_deaths:
 		_last_deaths = deaths
 		TTAudio.play_death()
+		# Death particle burst at the hero's death position, then the
+		# TAP TO RETRY prompt (schema: burst first, prompt after).
+		if _death_burst != null and player != null and is_instance_valid(player):
+			_death_burst.spawn_burst(player.global_position)
 	if _death_label != null and is_instance_valid(_death_label):
 		_death_label.visible = runtime.dead
 	if hud != null and is_instance_valid(hud):
 		hud.set_deaths(deaths)
+		# Death state: pause + restart (+ skip) hidden; only the
+		# top-centre level indicator stays.
+		hud.set_dead(runtime.dead)
 	if controls != null and player != null and is_instance_valid(player):
 		var st := controls.get_input_state()
 		touch_left = bool(st["left"])
@@ -216,15 +246,39 @@ func _physics_process(_delta: float) -> void:
 	if runtime.level_completed and not _win_saved:
 		_win_saved = true
 		TTAudio.play_win()
+		# EXCEED: door-enter celebration — confetti burst at the door
+		# (the reference has no celebration at all). The wipe is
+		# DELAYED so the burst is actually visible: the win delay
+		# is 0.9s and the wipe only starts covering at 0.3s left,
+		# so the player sees ~0.6s of confetti before the transition.
+		if _confetti != null and builder != null and builder.door != null:
+			_confetti.spawn_burst(builder.door.centre)
 		if not levels.is_empty():
 			TTProgress.complete_level(str(current_level.get("id", "")), level_index, levels.size())
-			_win_delay = 0.3
+			_win_delay = 0.9
+			_wipe_started = false
 
 
 func _process(delta: float) -> void:
+	# Hero-less beat after the level-start transition: the hero
+	# appears once the beat expires (physics already running).
+	if _hero_beat > 0.0:
+		_hero_beat -= delta
+		if _hero_beat <= 0.0:
+			_hero_beat = -1.0
+			if player != null and is_instance_valid(player):
+				if runtime == null or not bool(runtime.get("dead")):
+					player.visible = true
 	if _win_delay < 0.0:
 		return
 	_win_delay -= delta
+	# EXCEED: the win wipe starts only at 0.3s left, so the door
+	# confetti plays uncovered for ~0.6s first. The skip path covers
+	# immediately (it sets _wipe_started), so this never re-fires.
+	if _win_delay <= 0.3 and not _wipe_started:
+		_wipe_started = true
+		if _wipe != null:
+			_wipe.cover()
 	if _win_delay > 0.0:
 		return
 	_win_delay = -1.0
@@ -283,14 +337,22 @@ func _on_skip_pressed() -> void:
 	resume_game()
 	# Skip unlocks the next level WITHOUT marking this one complete
 	# and WITHOUT the win sound, then returns to the map like a win.
+	# EXCEED: the skip gets its own two-note chirp.
+	TTAudio.play_skip()
 	TTProgress.unlock_level(level_index, levels.size())
 	_win_saved = true
+	if _wipe != null:
+		_wipe.cover()
+	_wipe_started = true
 	_win_delay = 0.3
 
 
 func _exit_to_map() -> void:
 	get_tree().paused = false
 	_paused = false
+	# Original wipe covers the exit before the scene changes.
+	if _wipe != null:
+		await _wipe.cover()
 	get_tree().change_scene_to_file("res://scenes/map.tscn")
 
 

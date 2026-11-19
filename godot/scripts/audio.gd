@@ -28,6 +28,19 @@ static var _settings_loaded := false
 static var _music_queued := false
 static var _sfx_queued := false
 static var _sfx_play_queued := false
+# EXCEED: tone log for the headless probe (headless cannot hear audio,
+# so the probe proves each action fires its tone by reading this log).
+static var _tone_log: Array = []
+
+
+static func get_tone_log() -> Array:
+	return _tone_log.duplicate()
+
+
+static func _log_tone(name: String) -> void:
+	_tone_log.append(name)
+	if _tone_log.size() > 64:
+		_tone_log = _tone_log.slice(_tone_log.size() - 64)
 
 
 static func ensure_audio(tree: SceneTree) -> void:
@@ -81,11 +94,31 @@ static func get_music_volume() -> float:
 
 
 static func play_death() -> void:
+	_log_tone("death")
 	_play(_death_tone())
 
 
 static func play_win() -> void:
+	_log_tone("win")
 	_play(_win_tone())
+
+
+# EXCEED (19 Nov 2026): jump / land / skip tones — the match phase
+# only had death + win. Jump = short rising blip; land = soft low
+# thud; skip = two-note chirp. All runtime-generated PCM, zero assets.
+static func play_jump() -> void:
+	_log_tone("jump")
+	_play(_jump_tone())
+
+
+static func play_land() -> void:
+	_log_tone("land")
+	_play(_land_tone())
+
+
+static func play_skip() -> void:
+	_log_tone("skip")
+	_play(_skip_tone())
 
 
 static func _apply_settings() -> void:
@@ -157,6 +190,29 @@ static func _play(stream: AudioStreamWAV) -> void:
 		_sfx_player.play.call_deferred()
 
 
+static var _jump_stream: AudioStreamWAV = null
+static var _land_stream: AudioStreamWAV = null
+static var _skip_stream: AudioStreamWAV = null
+
+
+static func _jump_tone() -> AudioStreamWAV:
+	if _jump_stream == null:
+		_jump_stream = _make_sweep(0.08, 400.0, 800.0, 0.4)
+	return _jump_stream
+
+
+static func _land_tone() -> AudioStreamWAV:
+	if _land_stream == null:
+		_land_stream = _make_sweep(0.09, 220.0, 90.0, 0.5)
+	return _land_stream
+
+
+static func _skip_tone() -> AudioStreamWAV:
+	if _skip_stream == null:
+		_skip_stream = _make_two_note(0.07, 660.0, 880.0, 0.45)
+	return _skip_stream
+
+
 static func _death_tone() -> AudioStreamWAV:
 	if _death_stream == null:
 		_death_stream = _make_sweep(0.18, 700.0, 160.0, 0.5)
@@ -173,6 +229,29 @@ static func _music_tone() -> AudioStreamWAV:
 	if _music_stream == null:
 		_music_stream = _make_music()
 	return _music_stream
+
+
+# Two equal notes back to back (skip chirp): note1 then note2, each
+# faded in/out so the join is click-free. 8-bit PCM like _make_sweep.
+static func _make_two_note(note_dur: float, freq1: float, freq2: float, amp: float) -> AudioStreamWAV:
+	var total_dur := note_dur * 2.0
+	var n := int(total_dur * float(MIX_RATE))
+	var data := PackedByteArray()
+	data.resize(n)
+	for i in range(n):
+		var t := float(i) / float(MIX_RATE)
+		var idx := 0 if t < note_dur else 1
+		var local := fmod(t, note_dur)
+		var freq := freq1 if idx == 0 else freq2
+		var env := smoothstep(0.0, 0.008, local) * (1.0 - smoothstep(note_dur - 0.008, note_dur, local))
+		var s := sin(TAU * freq * local) * amp * env
+		data[i] = clampi(128 + int(127.0 * s), 0, 255)
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_8_BITS
+	stream.mix_rate = MIX_RATE
+	stream.stereo = false
+	stream.data = data
+	return stream
 
 
 # One sine sweep with attack + decay envelope. 8-bit PCM, unsigned

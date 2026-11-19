@@ -81,7 +81,10 @@ func _physics_process(delta: float) -> void:
 			position.y += fall_vy * delta
 			if kind == "tilting":
 				rotation += delta * 0.9
-			if position.y - rect.size.y * 0.5 > 660.0:
+			# Disable collision once the platform top has fallen past
+			# the fall-death line (the player is already dead by
+			# then); v2 used 660.0 against the old 640 death line.
+			if position.y - rect.size.y * 0.5 > TTuning.FALL_DEATH_Y:
 				_shape.disabled = true
 			queue_redraw()
 	elif kind == "moving" and period > 0.0:
@@ -108,9 +111,12 @@ func _draw() -> void:
 		draw_rect(r, faint)
 		_draw_dashed_rect(r, plat_col)
 	else:
+		# Schema v3: falling/tilting draw IDENTICALLY to solid at rest —
+		# same fill, no seam, no outline, no marker, no colour difference.
+		# The floor lies. Tilt/rotation only AFTER triggering (in
+		# _physics_process, once falling); nothing marks the platform
+		# before it fires.
 		draw_rect(r, plat_col)
-		if (kind == "falling" or kind == "tilting") and stand_timer > 0.0 and not falling:
-			draw_rect(Rect2(r.position, Vector2(r.size.x, 4)), Color(0, 0, 0, 0.25))
 
 
 func _draw_dashed_rect(r: Rect2, col: Color) -> void:

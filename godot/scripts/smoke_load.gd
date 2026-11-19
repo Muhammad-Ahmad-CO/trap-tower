@@ -29,10 +29,9 @@ func _initialize() -> void:
 		],
 		"hazards": [
 			{"type": "spikes", "x": 300, "y": 476, "w": 120, "h": 24, "dir": "up", "period": 2.4, "phase": 0.0, "on_time": 1.2},
-			{"type": "dotted_line", "x": 280, "y": 440, "w": 160, "h": 8, "linked": 0},
 		],
 	}
-	var data := {"schema_version": 2, "tuning_version": 1, "levels": [lv1, lv2]}
+	var data := {"schema_version": 3, "tuning_version": 1, "levels": [lv1, lv2]}
 	var err: String = data_script.validate_file(data, tuning)
 	if err != "":
 		print("SMOKE ERROR: validation failed: ", err)
@@ -76,11 +75,7 @@ func _initialize() -> void:
 				print("SMOKE ERROR: pop-up spikes not lethal while up (t=0)")
 				quit(1)
 				return
-			if bool(hazards[1].kills(overlap)):
-				print("SMOKE ERROR: dotted_line killed (must never be lethal)")
-				quit(1)
-				return
-			print("SMOKE L002 trap checks OK (dashed present, popup lethal, dotted safe)")
+			print("SMOKE L002 trap checks OK (dashed present, popup lethal)")
 	for action in ["move_left", "move_right", "jump"]:
 		if not InputMap.has_action(action) or InputMap.action_get_events(action).is_empty():
 			print("SMOKE ERROR: input action missing or unbound: ", action)
