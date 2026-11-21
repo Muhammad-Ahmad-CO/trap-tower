@@ -183,8 +183,8 @@ Types:
   >= 1.6) for a moving saw, OR `swing`: `{"pivot_x", "pivot_y",
   "arc_deg", "period"}` for a pendulum saw. `x,y` = centre at rest /
   path start. Lethal circle = r. The disc must touch solid geometry
-  over its full sweep (rule 7); a swing pivot must lie inside a solid
-  beam. Swing connectors draw as a thin SOLID-COLOUR bar (silhouette-
+  at at least one point of its sweep (rule 7); a swing pivot must lie
+  inside a solid beam. Swing connectors draw as a thin SOLID-COLOUR bar (silhouette-
   consistent); NO gears, brackets, bolts, or machine-like mounts. Saws
   appear ONLY in saw-family + mix/final archetypes (rule 11). The disc
   draws in the solid colour; no extra colours.
@@ -239,9 +239,11 @@ only (checker fail + report); the runtime does not check them.
    differ AND they differ in >= 2 of {layout geometry, trap set/params,
    solution path}. Palette-only, mirror-only, or trivial-shift variants
    are duplicates and must be rejected. VARIETY RULE: each archetype's
-   5 slots MUST span >= 3 distinct shape skeletons (documented skeleton
+   shipped slots MUST span >= 3 distinct shape skeletons (documented skeleton
    table); eyes-on review judges within-group visual diversity every
    loop — 5 copies of one layout are a defect even if signatures differ.
+   (D3 ships 4 slots; D44 ships 1 slot, a single level, so the >= 3
+   skeleton span does not apply to it.)
 7. GROUNDING — no floating geometry, ever. "Grounded" is the least
    fixpoint: a platform is grounded iff it is a floor (bottom at
    y=720), or rests on grounded support(s), or is pillar-connected to
@@ -265,8 +267,12 @@ only (checker fail + report); the runtime does not check them.
      side face within 4px of a solid side. Pit-bottom spikes with no
      pit-floor solid are forbidden.
    - `saw`: the disc must touch a solid rect (centre-to-rect distance
-     <= r + 4) at rest AND at every swept sample (path endpoints and
-     13-sample swing arc). Swing pivots must lie inside a solid beam.
+     <= r + 4) at AT LEAST ONE swept sample (rest / path endpoint /
+     13-sample swing arc) for a MOVING saw (path/swing) — Stage 2 §4.3
+     R1: a gap-patrol disc inherently cannot touch solid over the gap,
+     so the old every-sample rule made every gap-patrol geometry fail
+     by construction. A STATIC saw (single centre) must touch at that
+     centre. Swing pivots must lie inside a solid beam.
    - `spiked_column`: bottom on a solid top/floor, or top attached under
      a grounded beam bottom.
    - Rect hazards (`spikes`, `spiked_column`) must not area-overlap
@@ -333,7 +339,8 @@ only (checker fail + report); the runtime does not check them.
   circular arrow; original drawings). Top-right: Skip button
   ("SKIP >>", same dark-red/yellow minimal style), visible ONLY after
   >= 3 deaths in the current level. Skip unlocks the next level
-  without marking the current one complete, then returns to the map.
+  without marking the current one complete, then returns to the map
+  with the played door's picker auto-opened.
 - HUD accent colours (dark-red + yellow) are FIXED code constants,
   independent of the level palette, and MUST never clash with any
   palette (proven on gold palettes, the v1.0.3 contrast minor).
@@ -348,17 +355,27 @@ only (checker fail + report); the runtime does not check them.
   behind. The `deaths` counter increments synchronously in the death
   frame.
 - Win: completing a level saves progress (ID marked complete, next
-  level unlocked) and returns to the map. There is NO auto-chain into
-  the next level.
+  level unlocked) and returns to the map with the played door's picker
+  auto-opened. There is NO auto-chain into the next level: no stage
+  ever auto-advances to the next stage.
 - Level select is a WORLD MAP: ONE organic island silhouette (original
-  shape/colours) with ONE winding trail; all 215 level nodes sit ON the
+  shape/colours) with ONE winding trail; 44 door nodes sit ON the
   trail in shipped order (scrollable vertically, snake-like but organic
   — varying x, no rigid grid), joined by thin crack-style path lines;
-  the current node glows with a triangle marker; completed nodes show a
-  check; locked nodes are dimmed + show a lock + are unclickable.
-  Tapping a node plays exactly that level. There is NO door picker.
-  Unlock derives from the highest unlocked level index, never from the
-  completed-ID set. Big chunky pixel-font "TRAP TOWER" title + "Made by
+  the current door glows with a triangle marker; completed doors show a
+  check; locked doors are dimmed + show a lock + are unclickable.
+  Tapping a door opens its stage picker: a dismissible overlay (close X
+  + tap-outside to close) listing that door's stages — one stage = one
+  level — with the obstacle type as the picker subtitle. There is no
+  auto-select and no NEXT button in the picker; tapping a stage plays
+  exactly that level. After a win or a skip, the map returns with the
+  played door's picker auto-opened (TTState.return_door); pause-exit
+  returns to the plain map with no picker open. A stage never
+  auto-advances to the next stage. Door state is derived from the save,
+  never stored per door: a door is unlocked iff its first stage index
+  <= highest_unlocked; the current door is the door of
+  highest_unlocked; a door is done iff all of its stage IDs are in the
+  completed set. Big chunky pixel-font "TRAP TOWER" title + "Made by
   Ahmed" visible on first view; settings wrench top-right. Settings
   (sound toggle + music volume + close) live on the map screen only.
 - Touch controls (EVERY level, overlaying the play area — NO solid
@@ -387,13 +404,143 @@ only (checker fail + report); the runtime does not check them.
   level).
 - No other in-level HUD: no deaths, timer, or score on the play screen.
 
-## Structure (Run 3 flat structure, kept)
+## Structure (v1.0.5 door structure)
 
-- Levels ship FLAT: 215 individually selectable levels in archetype-major
-  order (43 archetype groups x 5 levels; each group shares one gimmick
-  and one palette). There are no doors, no stages-within-doors, and no
-  multiple-of-5 requirement on the shipped file beyond the 200-level
-  floor (target 215).
+- Levels ship grouped into 44 doors on the island map (215 stages
+  total; one stage = one level). Each door shares one obstacle type
+  (template) and one palette (door N = palette N-1). All 44 templates
+  are distinct — no two doors share an obstacle type. The grouping is
+  the frozen door table in `godot/scripts/door_map.gd` (class
+  `TTDoorMap`), derived from
+  `verification/exceed/assembly-mapping-exceed.json` (sha 350de95b =
+  live `levels.json`); never derive a door from the level index by
+  arithmetic — door 3 has 4 stages, so doors 4+ shift by one. Most
+  doors have 5 stages; door 3 has 4 (L011-014) and door 44 has 1
+  (L215). Within a door, the stages are variants of the one gimmick;
+  no ordering claim is made about the slots.
+
+| Door | Template | Levels | Palette |
+|---|---|---|---|
+| D1 | pitfall | L001-005 | 0 |
+| D2 | spike-hops | L006-010 | 1 |
+| D3 | saw-runs | L011-014 | 2 |
+| D4 | popup-spikes | L015-019 | 3 |
+| D5 | triggered-spikes | L020-024 | 4 |
+| D6 | triggered-pillars | L025-029 | 5 |
+| D7 | periodic-pillars | L030-034 | 6 |
+| D8 | swing-saws | L035-039 | 7 |
+| D9 | patrol-saws | L040-044 | 8 |
+| D10 | gap-saws | L045-049 | 9 |
+| D11 | spiked-columns | L050-054 | 10 |
+| D12 | dashed-chains | L055-059 | 11 |
+| D13 | falling-floors | L060-064 | 12 |
+| D14 | tilting-blocks | L065-069 | 13 |
+| D15 | moving-bridges | L070-074 | 14 |
+| D16 | mover-chains | L075-079 | 15 |
+| D17 | ceiling-spikes | L080-084 | 16 |
+| D18 | wall-spikes | L085-089 | 17 |
+| D19 | step-climbs | L090-094 | 18 |
+| D20 | double-gaps | L095-099 | 19 |
+| D21 | pit-bridges | L100-104 | 20 |
+| D22 | gauntlets | L105-109 | 21 |
+| D23 | timed-mixes | L110-114 | 22 |
+| D24 | pillar-alleys | L115-119 | 23 |
+| D25 | pillar-forests | L120-124 | 24 |
+| D26 | grand-mixes | L125-129 | 25 |
+| D27 | mover-lifts | L130-134 | 26 |
+| D28 | tower-descents | L135-139 | 27 |
+| D29 | reversed-runs | L140-144 | 28 |
+| D30 | skyline-city | L145-149 | 29 |
+| D31 | drop-shafts | L150-154 | 30 |
+| D32 | zigzag-descents | L155-159 | 31 |
+| D33 | saw-fields | L160-164 | 32 |
+| D34 | trigger-pits | L165-169 | 33 |
+| D35 | spike-forests | L170-174 | 34 |
+| D36 | ceiling-gauntlets | L175-179 | 35 |
+| D37 | saw-corridors | L180-184 | 36 |
+| D38 | timed-corridors | L185-189 | 37 |
+| D39 | dashed-towers | L190-194 | 38 |
+| D40 | column-forests | L195-199 | 39 |
+| D41 | final-tower-saws | L200-204 | 40 |
+| D42 | final-skyline | L205-209 | 41 |
+| D43 | final-reversed | L210-214 | 42 |
+| D44 | final-mega | L215 | 43 |
+
+## Part B (v1.0.5) — redesigned doors: mechanics + per-door ramp
+
+The 2026-11-19 type-uniqueness audit found 26 of 44 doors duplicated
+another door's mechanic (13 PASS / 5 BORDERLINE / 26 FAIL). Part B
+regenerated the flagged doors' builders (same schema kinds/fields, no
+new kinds). Template NAMES above are frozen identifiers (they appear in
+`godot/scripts/door_map.gd` and in shipped `levels.json`); the MECHANIC
+column below is what actually changed. "Distinct" means a different rule
+the player must learn, not a different position/shape/count.
+
+### Per-door ramp (new in Part B)
+
+Every regenerated door carries slot-indexed tables inside its
+`v3_dXX` builder: hazard count non-decreasing, timing periods
+decreasing, speeds/leads tightening, and clear widths shrinking across
+slots 1→5. The ramp is per-door (no global ramp parameter exists).
+Where a count deviates from monotone (a seat proved unbuildable under
+the frozen checker/autopilot), the deviation is recorded honestly
+below — the ramp tables are the builders' actual tables, not targets.
+
+| Door | Part B mechanic (rule the player must learn) | Ramp (slots 1→5) |
+|---|---|---|
+| D01 | Blink pit: a floor segment blinks (dashed) while triggered strips pop on approach. | dashed period [3.0,2.8,2.8,2.6,2.6], on [2.0,2.0,1.8,1.8,1.6]; triggered lead [220,210,200,190,180]. S4 double-pit uses offset phases. |
+| D08 | Saw-bridge: a STATIC floor-grazing saw on a narrow bridge over a pit — jump the pit while clearing the saw. (Moving/patrol saws are unbuildable under the frozen checker+autopilot; see run ledger.) | saw r [18,20,20,22,22]; pit_w [160,160,160,140,140]. |
+| D09 | Raised walkway: static saws grazing an elevated walkway, gaps below. | n_saws [1,2,2,2,3] (S4 capped at 2: 3 saws at 120px centres make the bot jump into the next disc). |
+| D10 | Pier saw: a STATIC saw on a mid-gap solid pier; path is dashed/falling stones. | stone stand [1.4,1.2,1.2,1.0,1.0]; period [3.0,2.8,2.8,2.6,2.6]. |
+| D14 | Tilting stone + periodic popup on the same divider, simultaneous. (Distinctness rests on the popup pairing; tilting alone equals D13's falling.) | stand [2.0,1.8,1.8,1.6,1.6]; popup period [3.4,3.0,3.0,2.6,2.6], on [1.6,1.4,1.4,1.2,1.2]. |
+| D16 | Chained movers: one horizontal slide + one vertical bob per slot; board the slide by a 40 drop, never flush. | period [3.8,3.6,3.6,3.4,3.4]; bob dy [40,50,50,60,60]. |
+| D17 | Ceiling teeth at jump height over raised ground, every level (don't jump high here). | teeth groups [3,5,5,5,5] (S5 lost a group to the beam Blocker law). |
+| D18 | Drop-shaft: fall a narrow shaft, climb in, door on the shaft floor; side teeth at jump height in the shaft. | shaft width [260,240,240,220,220] (narrowing); teeth height [40,48,48,56,60]. |
+| D20 | Sync pairs: both gap stones crossed in ONE jump arc (linked pair via geometry, no new field). | dashed period [3.0,2.8,2.8,2.6,2.6], on [2.0,2.0,1.8,1.8,1.6]; falling/tilting stand [1.4,1.2,1.2,1.0,1.0]. |
+| D21 | Pit-bridge + triggered pillar over the divider (pillar lands as a block to jump over). S3/S5 use a periodic pillar instead (a triggered pillar would land buried / overshoot). | pillar speed [700,750,800,850,900]; stand [1.4,1.2,1.2,1.0,1.0]. |
+| D22 | Twin columns + popup: two 24-tall columns 6px apart cleared in ONE jump arc, plus a periodic popup past the landing. (36-tall twin pairs are unjumpable; rule 11 forbids saws here.) | popup period [3.4,3.0,3.0,2.6,2.6], on [1.6,1.4,1.4,1.2,1.2]; pair count [1,1,1,2,2]. |
+| D23 | Popup UNDER the pillar's fall column: two different clocks in the same space. | pillar period [4.4,4.0,4.0,3.6,3.6]; popup period [3.4,3.0,3.0,2.6,2.6]. |
+| D24 | Overlapping drop zones: a triggered pillar (40w) + a periodic pillar (60w) overlapping 10px — one continuous danger zone, no safe gap. | periodic period [4.4,4.0,4.0,3.6,3.6]; triggered speed [600,650,650,700,700]. |
+| D25 | Three overlapping pillars (triggered + periodic + triggered, 120px continuous zone). | same as D24. |
+| D26 | Pier + static saw + dashed stone after the pier (saw seated on a solid pier, never over a dashed stone — saw touch is checked against SOLID rects only). | saw r [22,22,24,24,26]; dashed period [3.0,2.8,2.8,2.6,2.6], on [2.0,2.0,1.8,1.8,1.6]. |
+| D27 | Elevator restored: a mover (dy=-200) carries the player to a 440 ledge. (Required mover rides are autopilot-provable: strategy 2, 0 deaths.) | mover period [3.8,3.6,3.6,3.4,3.4]; ledge strips tighten per slot. dy stays -200 in every slot (changing it moves the ledge and breaks beam clearance). |
+| D29 | Reversed, triggered strips armed from the right DOMINANT in every level + columns. (Mechanic is D05's triggered strip, mirrored; distinctness rests on the reversed route + column pairing.) | triggered count [2,3,3,4,4]; lead [160,140,140,120,120] (decreasing = tighter). |
+| D30 | Descending slots (1,3,5) only: tower-floor static strips become periodic popups. Ascending slots (2,4) unchanged. | descending popup count [2,3,4]; period [3.4,3.0,2.6], on [1.6,1.4,1.2]. |
+| D32 | Tower floors ALTERNATE solid/dashed (floor1 solid, floor2 dashed, floor3 solid, floor4 dashed). Distinct from D39 (all dashed) and D28 (all solid). | dashed period [3.2,3.0,3.0,2.8,2.8], on [2.2,2.0,2.0,1.8,1.8]. |
+| D33 | Saw-steps: static saws seated on ascending/descending steps at three heights. | n_saws [2,2,3,3,3]. |
+| D34 | Mover pit: the pit's floor is a moving stone the player rides across, plus triggered strips. | mover period [3.2,3.0,3.0,2.8,2.8]; triggered lead [220,210,200,190,180]. S3 pit is 120w (80w mover + 40px sweep); fits x0=160 but not x0=200. |
+| D35 | Ceiling teeth at jump height over raised ground (beam bottom 4px above the jump head apex; walking clears them, jumping kills). | teeth clusters [2,2,3,3,4]; strip count [1,1,2,2,1] (S5 has 1: its second strip sat in a landing zone). |
+| D36 | Periodic pillar AND ceiling teeth at jump height over raised ground, simultaneous. NO strips (a strip-jump takeoff under a teeth cluster kills the autopilot; ablation-proven). | pillar period [4.4,4.0,4.0,3.6,3.6]; teeth clusters [2,3,3,4,4]. |
+| D37 | Corridor static saws under the corridor beam. (Mechanic converges with D03; the corridor is visual identity — recorded honestly.) | saw r [22,22,24,24,24]. |
+| D38 | Dashed gap INSIDE the pillar's fall column: cross the blinking stone while the pillar is up. | pillar period [4.4,4.0,4.0,3.6,3.6]; pillar count [1,1,1,2,2]. |
+| D40 | Hanging stalactites: spiked columns top-attached under a grounded beam at jump height (don't jump under them). A solid hanger block cannot hang (grounding needs rest-on or pillar-from-below); a single 74-tall hanging column is accepted by the checker's `hung` rule and the generator-side span guard exempts hanging columns. A stalactite only works over a 640 surface (walking head 601 clears the 560 bottom by 41px). | stalactite count [2,3,3,4,4]; strip count [1,1,2,3,3] (S2 has 1: its second strip had no legal seat). |
+| D43 | Reversed, triggered strips armed from the right DOMINANT in every level + static saws (D29's second element is columns — that is the D43 distinction). Saw r capped at 24: a r=26 (52w) disc is unjumpable in reverse. | triggered count [2,2,3,4,4] (S2 has 2: a post-gap strip is unplaceable); lead [160,140,140,120,120]; saw r [22,22,24,24,24]; saw count [1,1,2,1,1]. |
+| D44 | Simultaneous finale (slot 1 only; slots 2-5 are spares): a periodic pillar AND a popup under its fall column AND a dashed gap stone AND a static saw, all inside one ~300px crossing zone — not a sequence. | No ramp (single level). |
+
+### O2 mass (Part B)
+
+Where a flagged door was regenerated, massive solid slabs are preferred
+over thin ~12px beams (steps, plateaus, piers, bridges). Full O2 overhaul
+(replacing beams with slabs everywhere) is out of scope — beams are
+needed for grounding, and unflagged doors were not redesigned for mass
+alone.
+
+### Honest distinctness gaps remaining (Part B)
+
+- D14: distinctness rests on the tilting+popup pairing; if the auditor
+  still calls it a duplicate of D13, it needs a coordinator ruling
+  (a rising stone needs a NEW kind = schema change).
+- D29/D43: the mechanic is D05's triggered strip, mirrored; distinctness
+  rests on the reversed route + the second element (columns for D29,
+  saws for D43). If the auditor still calls them D05-mirrored, that is
+  a coordinator ruling, not a builder fix.
+- D37: the mechanic converges with D03 (static saws under a beam); the
+  corridor is visual identity.
+- D18: distinctness from D31 rests on the narrow block-gap geometry
+  (the shaft is D31's vertical-fall pattern with a climb-in and the
+  door on the shaft floor).
+- D08: D01 (pit) + D03 (static saw), not a wholly new kind; pendulum
+  timing is lost (moving saws are unbuildable).
 - Candidate levels carry IDs of the form `D{archetype:02d}S{slot}V{variant}`
   and are assembled into the shipped file by `tools/assemble_levels.py`
   (first passing variant per archetype/slot; incomplete archetypes
@@ -407,11 +554,12 @@ only (checker fail + report); the runtime does not check them.
   end-to-end after assembly; the verified count is read from the shipped
   file's own verification report, never from the candidates report.
 - Save compatibility: SAVE_VERSION stays 3. Unlock derives from the
-  highest unlocked INDEX, which survives regeneration correctly; the
-  completed-ID checkmarks may map to different geometry after a
-  regeneration — accepted as cosmetic (documented in the run ledger).
-  A save-version bump would wipe the user's unlock progress and is NOT
-  used.
+  highest unlocked INDEX, which survives regeneration correctly; door
+  state is derived from it (see Level select above), so no per-door
+  state is stored. The completed-ID checkmarks may map to different
+  geometry after a regeneration — accepted as cosmetic (documented in
+  the run ledger). A save-version bump would wipe the user's unlock
+  progress and is NOT used.
 
 ## Example (minimal teaching level)
 

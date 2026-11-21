@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """Generate Trap Tower's launcher icon (godot/assets/icon.png).
 
-Original flat design, drawn pixel by pixel with the standard library only
-(no Pillow): orange background, purple ground, white rounded-top door,
-small navy runner. Deterministic output.
+Preferred source (user picked 20 Nov 2026): the game logo
+(assets/icon-logo.png — pixel-font TRAP TOWER, tiny hero jumping over
+spikes, orange background, 512x512, delivered via the browser route
+because PNG binaries cannot ride the text-only snapshot push). When
+that file is present, this script copies it to icon.png verbatim.
+
+Fallback (no logo file yet, e.g. fresh checkout before the binary
+lands): the original flat design, drawn pixel by pixel with the
+standard library only (no Pillow): orange background, purple ground,
+white rounded-top door, small navy runner. Deterministic output.
 
 The PNG itself is a build artifact, NOT committed (the snapshot-push path
 is UTF-8 text only). CI runs this script before the Godot import step;
@@ -78,6 +85,11 @@ def main() -> int:
         else Path(__file__).resolve().parent.parent / "godot" / "assets" / "icon.png"
     )
     out.parent.mkdir(parents=True, exist_ok=True)
+    logo_icon = out.parent / "icon-logo.png"
+    if logo_icon.is_file():
+        out.write_bytes(logo_icon.read_bytes())
+        print(f"icon written (logo): {out} ({out.stat().st_size} bytes)")
+        return 0
     out.write_bytes(render())
     print(f"icon written: {out} ({out.stat().st_size} bytes)")
     return 0

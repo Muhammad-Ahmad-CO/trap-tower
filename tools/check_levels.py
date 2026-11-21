@@ -25,8 +25,9 @@ godot/data/levels.json + godot/data/tuning.json and checks:
       duplicate cluster is reported.
   (g) GROUNDING (rule 7): no floating geometry -- solid fixpoint
       (floor = bottom at y=720), shaft-flanked/resting specials,
-      seated spikes, saw disc touch over the full sweep, swing
-      pivots inside grounded beams. Rect hazards (spikes,
+      seated spikes, saw disc touch at at least one swept centre
+      (moving) / at its centre (static), swing pivots inside
+      grounded beams. Rect hazards (spikes,
       spiked_column) must not area-overlap solid rects beyond the
       4px seating tolerance (saws and hanging_pillar exempt).
   (h) HUD KEEP-OUT (rule 8): no drawn extent in y < 90; spawn feet
@@ -162,6 +163,28 @@ ENVELOPE_MIN_WINDOW = 0.7
 # at 60px so a strip is jumpable with margin. Any wider up-strip is
 # physically unjumpable however it is timed or seated.
 MAX_UP_SPIKE_W = 60.0
+# Stage 2 (Redesign Pass 2, Path C) — joint floor for the mixed moving-saw
+# move (parent ruling C4, verification/pass2/C4-RULING.md; spec
+# verification/pass2/stage2-checker-adaptation.md §7). The 0.7 s
+# ENVELOPE_MIN_WINDOW does NOT apply to departure windows; the joint
+# floor below is the operative departure floor. F1 takeoff width Wx >=
+# 8.1 px (2 lattice frames), F2 departure-phase width Wt >= 0.10 s
+# (6 frames), F3 centre clearance >= 4.05 px (1 lattice frame) — on
+# BOTH grids (1 px and the 4.05 px lattice), jump-over subset only,
+# centre combo. No threshold change without a physics proof.
+MIXED_FLOOR_WX = 8.1
+MIXED_FLOOR_WT = 0.10
+MIXED_FLOOR_CLEAR = 4.05
+# Stage 2 §1(iv)/S4: joint period (LCM over all timed hazards in the
+# segment, in frames) above this cap makes the mixed move INAPPLICABLE
+# (3600 frames = 60 s; without the cap the frozen-file LCM worst case
+# is 5,250,960 frames per check). All timed periods on a mixed-move
+# segment must be integer frames (period * 60 in Z); rounding is NOT
+# permitted.
+MIXED_JOINT_PERIOD_CAP_FRAMES = 3600
+# Stage 2 §1(i)/probe: takeoff scan range around the saw swept zone
+# (swept zone +/- 60 px, exactly as probe_mixed_trajectory.py).
+MIXED_TAKEOFF_SCAN_PAD = 60.0
 # Round 4, Rule 12 (new harness-only rule; LEVEL_SCHEMA.md v3 Rule 12
 # is additive documentation -- no version bump): chained-pair window
 # floor. Game-true air distance D = 97.2px (reconciled in
@@ -283,6 +306,24 @@ def trajectory_offsets(tun):
         if off > 220.0:
             break
     return offs
+
+
+def discrete_air_frames(tun):
+    """Stage 2 §3 (R5 frame convention, pinned): (land_frame, air_dx).
+
+    Frames f=0..22 are the AIRBORNE frames through first contact
+    (verified from trajectory_offsets with frozen tuning: offs[21] =
+    -9.44 still airborne, offs[22] = +0.064 at x = takeoff + 89.10,
+    the first frame at/below floor). Frame f=23 (x = takeoff + 93.15)
+    is the LANDING frame, simulated as a grounded stance — NOT an arc
+    frame. land_frame is the first frame > 10 with off >= 0 (22);
+    air_dx = (land_frame + 1) * run_speed/60 = 93.15 px. The
+    design-lane "23 frames x 4.05" wording was a fencepost error and
+    is withdrawn: frames f=0..22 span 22 intervals = 89.1 px; the
+    takeoff-to-landing distance is 23 intervals = 93.15 px."""
+    offs = trajectory_offsets(tun)
+    land_f = next(i for i, o in enumerate(offs) if i > 10 and o >= 0.0)
+    return land_f, (land_f + 1) * (float(tun.run_speed) / 60.0)
 
 
 def span_at_height(h, tun):
@@ -583,6 +624,11 @@ class LevelCheck:
         self.structural_ok = True
         self.density = None  # rule 9 stats, set by check_density_floor
         self.grounded_solids = set()  # rule 7 fixpoint, set by check_grounding
+        # Stage 2: per-segment mixed-move cache (keyed by segment +
+        # trig_map signature) and the last edge check's chosen t0
+        # (read by check_path_windows for the §4.3 walk-out followup).
+        self._mixed_cache = {}
+        self._edge_choice = None
 
     # -- (a) fields / params ----------------------------------------------
     def check_fields(self):
@@ -1025,14 +1071,36 @@ class LevelCheck:
                 if not is_num(h.get("r")):
                     continue
                 r = float(h["r"])
-                for (cx, cy) in saw_sweep_centres(h):
-                    if not any(point_rect_dist(cx, cy, s) <= r + GROUND_TOL
-                               for s in solid_rects):
+                # Stage 2 §4.3 (R1): a MOVING saw (path/swing) passes
+                # rule-7 grounding iff AT LEAST ONE swept centre
+                # touches solid (existential, not universal). A
+                # gap-patrol disc inherently cannot touch solid over
+                # the gap, so the old universal rule made every
+                # gap-patrol geometry fail grounding by construction
+                # (d10: rest centre dist 29.73 > 26 fails forall;
+                # path-end centre dist 22.00 <= 26 passes exists).
+                # Static saws have a single swept centre, so
+                # forall == exists for them — unchanged.
+                moving = "path" in h or "swing" in h
+                centres = saw_sweep_centres(h)
+                touches = [any(point_rect_dist(cx, cy, s) <= r + GROUND_TOL
+                               for s in solid_rects)
+                           for (cx, cy) in centres]
+                if moving:
+                    if not any(touches):
+                        cx, cy = centres[0]
                         self.errors.append(
                             "grounding: hazards[%d] saw disc does not "
-                            "touch solid at swept centre (%g,%g)"
-                            % (i, cx, cy))
-                        break
+                            "touch solid at any swept centre "
+                            "(first (%g,%g))" % (i, cx, cy))
+                else:
+                    for (cx, cy), ok in zip(centres, touches):
+                        if not ok:
+                            self.errors.append(
+                                "grounding: hazards[%d] saw disc does not "
+                                "touch solid at swept centre (%g,%g)"
+                                % (i, cx, cy))
+                            break
                 if "swing" in h and isinstance(h["swing"], dict):
                     s = h["swing"]
                     if all(is_num(s.get(k))
@@ -1574,7 +1642,14 @@ class LevelCheck:
 
     def _arc_samples(self, tx, ty, lx, ly, n=11):
         """Parabolic feet trajectory; peak ~apex above takeoff (conservative
-        when landing higher). Yields (x, feet_y)."""
+        when landing higher). Yields (x, feet_y).
+
+        Stage 2 §3: DEAD CODE for hazard decisions — the 11-point
+        parabola is replaced at all four sites (L1720 edge_info, L1911
+        edge timed, L1952 walk jump-over, L2113 walk static saw) by the
+        discrete-arc prefix (_discrete_arc_clear). Retained only so
+        filed read-only analysis scripts that import it keep running;
+        NO checker verdict may depend on it."""
         rise = ty - ly
         h = max(20.0, self.tun.apex - max(0.0, rise) / 2.0)
         for k in range(n):
@@ -1713,15 +1788,34 @@ class LevelCheck:
             if rects_overlap(r, band):
                 return None
         # Static saw in the corridor: the jump arc must clear its circle.
+        # Stage 2 §3.4: the parabola is replaced by the discrete-arc
+        # prefix from the edge takeoff to its LANDING (the graph's
+        # lx) — the airborne frames are truncated to those with x
+        # inside [tx, lx] and the landing stance is at lx (feet on
+        # by). The flight past lx belongs to the landing platform's
+        # segment and is judged there (L2113); a full-prefix arc
+        # here newly fails L035/L038/L039, which the autopilot
+        # passes in game mode (§3.5 false negatives: the saw past
+        # lx sits on the next platform, not in the gap).
         for h in self.lethal_hazards():
             if h.get("type") != "saw" or "path" in h or "swing" in h:
                 continue
             cx, cy, r = float(h["x"]), float(h["y"]), float(h["r"])
-            for (sx, sy) in self._arc_samples(tx, ay, lx, by):
-                prect = (sx - tun.player_w / 2.0, sy - tun.player_h,
+            if abs(lx - tx) < 1e-9:
+                prect = (tx - tun.player_w / 2.0, ay - tun.player_h,
                          tun.player_w, tun.player_h)
                 if circle_rect_overlap(cx, cy, r, prect):
                     return None
+                continue
+            _offs, _lf, air_dx = self._traj()
+            max_frame = int(abs(lx - tx)
+                            / (float(tun.run_speed) / 60.0))
+            ok, _clear, _detail = self._discrete_arc_clear(
+                tx, lx, ay, [h], t0=None, landing_top=by,
+                landing_platform=(rb[0], rb[2]), stance_hazards=[h],
+                max_frame=max_frame)
+            if not ok:
+                return None
         timed = self._timed_on_corridor(band, [zone])
         if pa_kind(self.lv["platforms"][a]) != "solid":
             timed.append("platform:%d" % a)
@@ -1882,12 +1976,810 @@ class LevelCheck:
         return False, entry_clear, \
             "no clean crossing in one period; entry clear %.2fs" % entry_clear
 
-    def _check_timed_hazard_crossing(self, h, seg, top, is_edge, edge):
+    # -- Stage 2 (Redesign Pass 2) discrete-arc helpers ------------------
+    def _traj(self):
+        """Cached (offs, land_frame, air_dx) for the discrete arc."""
+        if not hasattr(self, "_traj_cache"):
+            offs = trajectory_offsets(self.tun)
+            land_f, air_dx = discrete_air_frames(self.tun)
+            self._traj_cache = (offs, land_f, air_dx)
+        return self._traj_cache
+
+    def _discrete_arc_clear(self, tx, lx, top, hazards, t0=None,
+                            landing_top=None, landing_platform=None,
+                            trig_map=None, stance_hazards=None,
+                            max_frame=None):
+        """Stage 2 §3 shared fix — discrete-arc prefix clearance.
+
+        Frames f=0..22 (R5 frame convention, pinned): hero rect at
+        x = tx + direction*f*4.05, feet = top + offs[f] (offs from
+        trajectory_offsets; first-contact frame 22 at x = takeoff +
+        89.1, apex offset -56.99 px). Frame f=23 (x = takeoff + 93.15)
+        is the LANDING frame and is simulated as a grounded stance
+        (feet on landing_top, default top) at t0 + 23/60 — NOT as an
+        arc frame. `lx` is the landing feet-x: for the full prefix
+        (walk sites, edge timed check) it is the discrete landing
+        tx + direction*93.15 (§4.2 pins this for the gap edge); for
+        the graph site (§3.4) it is the edge's own landing and
+        max_frame truncates the airborne frames to those with x
+        inside [tx, lx] (the graph's edge model is a jump from tx
+        that lands at lx; the flight past lx belongs to the landing
+        platform's segment, judged there — a full-prefix arc at the
+        graph site newly fails L035/L038/L039, which the autopilot
+        passes in game mode, i.e. §3.5 false negatives).
+        The fixed span cx +/- (r+30) is DELETED everywhere this
+        helper is used.
+        Landing rule (§3.5 re-scope, feet-point): the landing
+        feet-x must lie on solid ground of landing_platform
+        (platform_x <= landing_x <= platform_x + w). The literal
+        +/- 7.5 margin (the whole hero rect inside the platform)
+        is WITHDRAWN: it newly fails shipped L049 (best discrete
+        clearance +4.29 px at tk606.35, landing 699.5 on platform
+        [578, 702], rejected only because 699.5 > 694.5 = 702-7.5)
+        while the autopilot passes L049 in game mode — a §3.5 false
+        negative. Physics: Godot grounds the hero on ANY positive
+        overlap of his 15 px rect with the platform (landing at
+        699.5 overlaps [578, 702] by 10 px); the +/- 7.5 margin
+        exceeds game physics and is the sole cause of L049's
+        failure. The feet-point rule does not rescue D26S5 (its
+        failure is the arc clearance, -0.22 px, not the landing)
+        and does not change L129 (it passes under either rule).
+        Takeoff stance: if stance_hazards is given, the standing hero
+        rect at tx (feet on top) must also be lethal-free vs those
+        hazards at t0 — the hero must be able to STAND at the
+        takeoff (mirrors the probe's run-in; a takeoff inside a
+        disc's ground footprint is unreachable even if the arc
+        frames, which start one frame into the jump at feet -9.5,
+        clear it).
+        Returns (clear, min_saw_clearance, detail): min_saw_clearance
+        is the min over arc frames + landing stance of
+        (point_rect_dist - r) over SAW hazards in `hazards` (None if
+        there is no saw hazard). Clearance is strict: clear requires
+        every frame's clearance > 0 (no knife-edge)."""
+        tun = self.tun
+        offs, land_f, air_dx = self._traj()
+        step = float(tun.run_speed) / 60.0
+        direction = 1 if lx >= tx else -1
+        if landing_top is None:
+            landing_top = top
+        if landing_platform is not None:
+            if isinstance(landing_platform, dict):
+                px, pw = (float(landing_platform["x"]),
+                          float(landing_platform["w"]))
+            else:
+                px, pw = (float(landing_platform[0]),
+                          float(landing_platform[1]))
+            # §3.5 feet-point landing rule (see the docstring): the
+            # landing FEET-x must lie on solid ground; the +/- 7.5
+            # margin is withdrawn (it newly fails shipped L049).
+            if not (px - 1e-9 <= lx <= px + pw + 1e-9):
+                return False, None, \
+                    "landing %.2f off platform [%.2f, %.2f]" \
+                    % (lx, px, px + pw)
+        trig_map = trig_map or {}
+        min_clear = None
+        last_frame = land_f if max_frame is None \
+            else min(land_f, max_frame)
+
+        def frame_rect(f):
+            x = tx + direction * f * step
+            fy = top + offs[f]
+            return (x - tun.player_w / 2.0, fy - tun.player_h,
+                    tun.player_w, tun.player_h)
+
+        def lethal_at(prect, t):
+            for h in hazards:
+                trig = trig_map.get(id(h))
+                if trig is None and t0 is not None:
+                    # Trigger crossed DURING the jump arms the hazard
+                    # at the crossing instant (clock-independent).
+                    trig = self._trigger_time_for_jump(h, tx, lx, t0,
+                                                       direction)
+                if self._hazard_lethal_at(h, prect, t, trig):
+                    return h
+            return None
+
+        if stance_hazards:
+            prect = (tx - tun.player_w / 2.0, top - tun.player_h,
+                     tun.player_w, tun.player_h)
+            for h in stance_hazards:
+                if self._hazard_lethal_at(h, prect, t0,
+                                          trig_map.get(id(h))):
+                    return False, None, \
+                        "takeoff stance at %.2f inside %s" \
+                        % (tx, h.get("type"))
+        for f in range(last_frame + 1):
+            prect = frame_rect(f)
+            t = None if t0 is None else t0 + f / 60.0
+            # Track the clearance BEFORE the lethal test, so a lethal
+            # arc still reports its (negative) best clearance as
+            # evidence instead of None.
+            for h in hazards:
+                if h.get("type") == "saw":
+                    cx, cy = saw_centre_at(h, t) if t is not None \
+                        else (float(h["x"]), float(h["y"]))
+                    d = point_rect_dist(cx, cy, prect) - float(h["r"])
+                    min_clear = d if min_clear is None \
+                        else min(min_clear, d)
+            bad = lethal_at(prect, t)
+            if bad is not None:
+                return False, min_clear, \
+                    "arc frame %d x=%.2f lethal vs %s (min clear %s)" \
+                    % (f, tx + direction * f * step, bad.get("type"),
+                       ("%.2f" % min_clear)
+                       if min_clear is not None else "n/a")
+        if max_frame is not None:
+            # Truncated (graph) arc: the landing at lx is reached
+            # after |lx - tx| / 243 s, not after the full 23-frame
+            # flight.
+            t_land = None if t0 is None else t0 + abs(lx - tx) \
+                / float(tun.run_speed)
+        else:
+            t_land = None if t0 is None else t0 + (land_f + 1) / 60.0
+        land_rect = (lx - tun.player_w / 2.0, landing_top - tun.player_h,
+                     tun.player_w, tun.player_h)
+        for h in hazards:
+            if h.get("type") == "saw":
+                cx, cy = saw_centre_at(h, t_land) if t_land is not None \
+                    else (float(h["x"]), float(h["y"]))
+                d = point_rect_dist(cx, cy, land_rect) - float(h["r"])
+                min_clear = d if min_clear is None else min(min_clear, d)
+        bad = lethal_at(land_rect, t_land)
+        if bad is not None:
+            return False, min_clear, \
+                "landing stance at %.2f lethal vs %s (min clear %s)" \
+                % (lx, bad.get("type"),
+                   ("%.2f" % min_clear)
+                   if min_clear is not None else "n/a")
+        if min_clear is not None and min_clear <= 0.0:
+            return False, min_clear, \
+                "arc clearance %.2f <= 0 (knife-edge)" % min_clear
+        return True, min_clear, "discrete arc clear (min clear %s)" \
+            % ("%.2f" % min_clear if min_clear is not None else "n/a")
+
+    def _entry_clear_window(self, h, entry_prect, period):
+        """Longest continuous interval in one period during which
+        standing at the entry point is safe — the same arithmetic as
+        _crossing_simulation's entry-clear (0.05 s steps, trig = 0.0
+        for triggered hazards, i.e. assumed already fired). Used ONLY
+        by the Stage 2 discrete-arc edge / jump-over branches; the
+        walk branch keeps its own byte-identical copy inside
+        _crossing_simulation. The 0.7 s bound on this window is
+        UNCHANGED (C4 ruling: it governs standing at an entry)."""
+        if not period:
+            return 0.0
+        trig_x = h.get("trigger_x", h.get("drop_trigger_x"))
+        step = 0.05
+        n = max(1, int(period / step))
+        run, best = 0.0, 0.0
+        for k in range(n + 1):
+            t = k * step
+            trig = 0.0 if trig_x is not None else None
+            if not self._hazard_lethal_at(h, entry_prect, t, trig):
+                run += step
+                best = max(best, run)
+            else:
+                run = 0.0
+        return best
+
+    def _trigger_time_for_jump(self, h, tx, lx, t0, direction):
+        """trig_time for a triggered hazard crossed DURING a jump from
+        tx (takeoff time t0) to lx: the crossing instant
+        t0 + |trigger_x - tx| / 243 (the hero's x(t) is linear at
+        243 px/s through the jump). Returns None for hazards with no
+        trigger, or whose trigger line is not crossed during the jump.
+        Approach arming is NOT computed here: it is clock-dependent
+        (the f.py rule t0 - |tx - trigger_x| / 243 holds only on the
+        mixed move's arrival clock, t=0 at the departure point; the
+        walk jump-over's clock is t=0 at the segment entry and the
+        edge's approach spans several intervals), so the caller
+        passes approach-armed triggers via trig_map (absolute times
+        on the same clock as t0) and this helper only covers the
+        in-jump crossing, which is clock-independent."""
+        trig_x = h.get("trigger_x", h.get("drop_trigger_x"))
+        if trig_x is None:
+            return None
+        trig_x = float(trig_x)
+        lo, hi = (tx, lx) if direction > 0 else (lx, tx)
+        if lo - 1e-9 <= trig_x <= hi + 1e-9:
+            return t0 + abs(trig_x - tx) / float(self.tun.run_speed)
+        return None
+
+    def _departure_point_safe(self, dep_x, top, level, period, trig_map):
+        """Stage 2 §1(ii) — departure-point safety (a SEPARATE named
+        check, full joint period).
+
+        dep_x is the departure point (the segment-entry stance, where
+        the hero stands before the run-in). trig_map maps id(hazard)
+        -> trig_time for triggered hazards, computed from the hero's
+        path TO dep_x exactly as in stage2-design-analysis-f.py
+        (armed iff the trigger line was crossed on the approach, with
+        trig_time = t_arrival - |dep_x - trigger_x| / 243; unarmed
+        hazards are absent, trig_time None). The local clock sets
+        t_arrival = 0. The standing hero rect (dep_x - 7.5, top - 39,
+        15, 39) is tested against ALL hazards via _hazard_lethal_at
+        at 1/60 s steps over one full joint period, in ABSOLUTE time
+        (periodic hazards at their absolute phase; triggered hazards
+        with their trig_time). Returns True iff lethal-free at every
+        step. This is a DEPARTURE window (a cued action — wait, watch
+        whole cycles, depart on a phase cue), NOT an entry-clear
+        window: per the parent C4 ruling it is NOT subject to
+        ENVELOPE_MIN_WINDOW 0.7 s; its operative floor is the joint
+        floor (F1/F2/F3). If False, the mixed move FAILS for the
+        segment (the hero cannot wait at the departure point; there is
+        no backwards walking to a safer stance)."""
+        tun = self.tun
+        dt = 1.0 / 60.0
+        frames = int(round(period * 60.0))
+        prect = (dep_x - tun.player_w / 2.0, top - tun.player_h,
+                 tun.player_w, tun.player_h)
+        hazards = level.get("hazards", [])
+        for k in range(frames):
+            t = k * dt
+            for h in hazards:
+                if self._hazard_lethal_at(h, prect, t,
+                                          trig_map.get(id(h))):
+                    return False
+        return True
+
+    def _largest_floor_rectangle(self, tks, t0s, masks, tk_step):
+        """Largest contained axis-aligned takeoff x t0 rectangle in
+        the clean set, requiring takeoff width >= MIXED_FLOOR_WX
+        (8.1 px) and t0 width >= MIXED_FLOOR_WT (0.10 s) — the mirror
+        of probe_mixed_trajectory.py's largest_rectangle (bitmask
+        intersection over the takeoff grid, longest set-bit run for
+        the t0 width, area = (Wx + tk_step) * (Wt + 1/60), first
+        max-area rectangle wins). Returns the rect dict (with
+        centre_takeoff / centre_t0) or None. A 7-consecutive-bit
+        pre-check (Wt >= 0.10 s needs 7 phase values) skips pairs
+        with no qualifying run without the full run scan."""
+        if not tks or not t0s:
+            return None
+        n_t0 = len(t0s)
+        dt = t0s[1] - t0s[0] if n_t0 > 1 else (1.0 / 60.0)
+        seven = 0
+        for b in range(7):
+            seven |= (1 << b)
+        best = None
+        best_area = 0.0
+        for i in range(len(tks)):
+            m = masks[i]
+            for j in range(i, len(tks)):
+                m &= masks[j]
+                if m == 0:
+                    break
+                w_tk = tks[j] - tks[i]
+                if w_tk < MIXED_FLOOR_WX - 1e-9:
+                    continue
+                # Upper bound: Wt can never exceed the full period.
+                if (w_tk + tk_step) * (t0s[-1] - t0s[0] + dt) \
+                        <= best_area:
+                    continue
+                # Fast check: any run of >= 7 consecutive set bits?
+                has7 = False
+                mm = m
+                for _s in range(6):
+                    mm &= (mm >> 1)
+                    if mm == 0:
+                        break
+                else:
+                    has7 = mm != 0
+                if not has7:
+                    continue
+                rs = rl = 0
+                cs = cl = 0
+                for b in range(n_t0):
+                    if m & (1 << b):
+                        if cl == 0:
+                            cs = b
+                        cl += 1
+                        if cl > rl:
+                            rl, rs = cl, cs
+                    else:
+                        cl = 0
+                if rl == 0:
+                    continue
+                w_t0 = t0s[rs + rl - 1] - t0s[rs]
+                if w_t0 < MIXED_FLOOR_WT - 1e-9:
+                    continue
+                area = (w_tk + tk_step) * (w_t0 + dt)
+                if area > best_area:
+                    best_area = area
+                    best = {"area": area, "takeoff_lo": tks[i],
+                            "takeoff_hi": tks[j], "takeoff_width": w_tk,
+                            "t0_lo": t0s[rs], "t0_hi": t0s[rs + rl - 1],
+                            "t0_width": w_t0,
+                            "centre_takeoff": 0.5 * (tks[i] + tks[j]),
+                            "centre_t0": 0.5 * (t0s[rs]
+                                               + t0s[rs + rl - 1]),
+                            "n_takeoff_values": j - i + 1,
+                            "n_t0_values": rl}
+        return best
+
+    def _walkout_followup(self, saw, landing_x, landing_phase, top,
+                          platform, direction):
+        """Stage 2 §4.3 walk-out followup (R1, S1-pinned).
+
+        When an edge jump's landing lies inside the crossed saw's
+        swept zone, the following segment's timed check for THAT saw
+        is replaced by this: a 1/60 s simulation from the landing
+        x/phase, walking at 243 px/s in `direction` to clear of the
+        swept zone + hero half-width, testing the hero rect against
+        the disc via saw_centre_at + circle_rect_overlap. Scope:
+        centre landing ONLY (the autopilot executes the
+        floor-rectangle centre); only that saw, only the immediately
+        following segment, only when the landing is inside the swept
+        zone. This is not a weakening of the 0.7 s gate: the 0.7 s
+        standing test must not judge a landing-side walk-out, because
+        the hero never stands at the platform entry — he LANDS (a
+        planned air arrival, C4's own distinction) and walks clear.
+        Returns (ok, reason)."""
+        tun = self.tun
+        r = float(saw["r"])
+        centres = saw_sweep_centres(saw)
+        xs = [c[0] for c in centres]
+        px, pw = float(platform["x"]), float(platform["w"])
+        if direction > 0:
+            clear_x = max(xs) + r + tun.player_w / 2.0
+        else:
+            clear_x = min(xs) - r - tun.player_w / 2.0
+        period = hazard_period(saw)
+        dt = 1.0 / 60.0
+        step = float(tun.run_speed) / 60.0
+        t = landing_phase
+        x = landing_x
+        steps = 0
+        while True:
+            if direction > 0 and x >= clear_x - 1e-9:
+                break
+            if direction < 0 and x <= clear_x + 1e-9:
+                break
+            if not (px - 1e-9 <= x <= px + pw + 1e-9):
+                return False, ("walk-out followup: walked off platform "
+                               "at x=%.2f before clear x=%.2f"
+                               % (x, clear_x))
+            cx, cy = saw_centre_at(saw, t)
+            prect = (x - tun.player_w / 2.0, top - tun.player_h,
+                     tun.player_w, tun.player_h)
+            if circle_rect_overlap(cx, cy, r, prect):
+                return False, ("walk-out followup: disc overlap at "
+                               "x=%.2f t=%.4f" % (x, t % period))
+            x += direction * step
+            t += dt
+            steps += 1
+            if steps > 600:
+                return False, "walk-out followup: did not clear in 600 steps"
+        return True, ("walk-out followup: CLEAN in %d steps to clear "
+                      "x=%.2f" % (steps, clear_x))
+
+    def _check_mixed_saw_crossing(self, entry_x, exit_x, top, platform,
+                                  path_intervals, exclude_saws=frozenset()):
+        """Stage 2 §1–§2 — the mixed moving-saw move (NEW, separate
+        code path; it NEVER calls _crossing_simulation).
+
+        For a flat, rightward walking segment containing moving saw(s):
+        a unified 1/60 s all-hazard simulation (wait at the departure
+        point + run-in + ONE discrete jump arc + walk-out), with the
+        segment-entry-anchored takeoff lattice, full-period
+        _departure_point_safe, the joint period (LCM over all timed
+        hazards in the segment, in frames, capped at 3600), and the
+        joint floor (F1/F2/F3 on BOTH grids, jump-over subset only,
+        centre combo). Floor up-spike strips inside the run-in /
+        walk-out are jumped at the centre of their span_at_height
+        window, lattice-snapped (§1(vi)); a strip jump does NOT
+        re-anchor the takeoff lattice.
+        Scope (out of scope = inapplicable, falls through to the walk
+        branch): non-flat / non-solid platform, leftward travel, more
+        than two moving saws, two moving saws with different periods,
+        any OTHER timed hazard in the segment (saw+pillar/popup mixes
+        are UNFILED until a mixed probe is filed — §1(iv)/§8), a
+        non-integer-frame period, a joint period over the 3600-frame
+        cap, a departure point unsafe for a full period, or a strip
+        jump that cannot be placed on the segment.
+        Returns a dict: ok (the segment is admitted for the moving
+        saw(s)), reason, centre_takeoff / centre_phase / Wx / Wt /
+        centre_clearance (the floor rectangle's centre, per grid),
+        grids (per-grid floor detail), period, joint_frames,
+        spike_jumps. `path_intervals` is the list of x-intervals the
+        hero traversed from spawn to entry_x (for the trig_map
+        approach test). `exclude_saws` are hazard indices covered by
+        the §4.3 walk-out followup (their crossing is judged there,
+        not here)."""
+        tun = self.tun
+        lv = self.lv
+        result = {"ok": False, "reason": "not attempted",
+                  "centre_takeoff": None, "centre_phase": None,
+                  "Wx": None, "Wt": None, "centre_clearance": None,
+                  "grids": {}, "period": None, "joint_frames": None,
+                  "spike_jumps": []}
+        step = float(tun.run_speed) / 60.0
+        dt = 1.0 / 60.0
+        offs, land_f, air_dx = self._traj()
+        # -- scope: flat, rightward, solid -------------------------------
+        if exit_x < entry_x - 1e-9:
+            result["reason"] = "mixed move inapplicable: leftward segment"
+            return result
+        if platform.get("kind") != "solid":
+            result["reason"] = ("mixed move inapplicable: platform kind %s "
+                                "(flat solid only)"
+                                % platform.get("kind"))
+            return result
+        px, pw = float(platform["x"]), float(platform["w"])
+        band = (min(entry_x, exit_x), top - tun.player_h,
+                max(abs(exit_x - entry_x), 1.0), tun.player_h)
+        hazards = lv.get("hazards", [])
+        seg_saws = []
+        for hi, h in enumerate(hazards):
+            if hi in exclude_saws:
+                continue
+            if h.get("type") == "saw" and ("path" in h or "swing" in h):
+                if rects_overlap(saw_swept_bbox(h), band):
+                    seg_saws.append((hi, h))
+        if not seg_saws:
+            result["reason"] = "mixed move inapplicable: no moving saw"
+            return result
+        if len(seg_saws) > 2:
+            result["reason"] = ("mixed move inapplicable: %d moving saws "
+                                "in one segment" % len(seg_saws))
+            return result
+        periods = [hazard_period(h) for _hi, h in seg_saws]
+        if len(set(periods)) > 1:
+            result["reason"] = ("mixed move inapplicable: two moving saws "
+                                "with different periods")
+            return result
+        # -- scope: no OTHER timed hazard in the segment ------------------
+        for hi, h in enumerate(hazards):
+            if hi in [s[0] for s in seg_saws] or hi in exclude_saws:
+                continue
+            timed = ("period" in h) or ("trigger_x" in h) \
+                or ("drop_trigger_x" in h)
+            if not timed:
+                continue
+            t = h.get("type")
+            if t == "saw":
+                touch = rects_overlap(saw_swept_bbox(h), band)
+            elif t == "hanging_pillar":
+                r = (float(h["x"]), float(h["y"]), float(h["w"]),
+                     float(h["h"]))
+                fall_col = (r[0], r[1], r[2], tun.floor_y - r[1])
+                touch = rects_overlap(fall_col, band)
+            else:
+                r = (float(h["x"]), float(h["y"]), float(h["w"]),
+                     float(h["h"]))
+                touch = rects_overlap(r, band)
+            if touch:
+                result["reason"] = ("mixed move inapplicable: other timed "
+                                    "hazard %s in segment (unfiled mix)"
+                                    % t)
+                return result
+        # -- joint period: LCM over all timed hazards, in frames ---------
+        frames = []
+        for p in periods:
+            f = float(p) * 60.0
+            if abs(f - round(f)) > 1e-9:
+                result["reason"] = ("mixed move inapplicable: non-integer-"
+                                    "frame period %.4f s" % float(p))
+                return result
+            frames.append(int(round(f)))
+        joint = frames[0]
+        for f in frames[1:]:
+            joint = joint * f // math.gcd(joint, f)
+        if joint > MIXED_JOINT_PERIOD_CAP_FRAMES:
+            result["reason"] = ("mixed move inapplicable: joint period %d "
+                                "frames > %d cap"
+                                % (joint, MIXED_JOINT_PERIOD_CAP_FRAMES))
+            return result
+        period = joint / 60.0
+        result["period"] = period
+        result["joint_frames"] = joint
+        # -- trig_map from the approach (f.py rule, §1(ii)) ---------------
+        trig_map = {}
+        for h in hazards:
+            trig_x = h.get("trigger_x", h.get("drop_trigger_x"))
+            if trig_x is None:
+                continue
+            trig_x = float(trig_x)
+            crossed = any(lo - 1e-9 <= trig_x <= hi + 1e-9
+                          for (lo, hi) in path_intervals)
+            if crossed:
+                trig_map[id(h)] = -abs(entry_x - trig_x) \
+                    / float(tun.run_speed)
+        # -- departure-point safety (full joint period) -------------------
+        if not self._departure_point_safe(entry_x, top, lv, period,
+                                          trig_map):
+            result["reason"] = ("mixed move fails: departure point unsafe "
+                                "for a full period")
+            return result
+        # -- strip jumps inside the segment (probe rule, §1(vi)) ---------
+        strip_jumps = []
+        for h in hazards:
+            if h.get("type") != "spikes" or h.get("dir", "up") != "up":
+                continue
+            sx, sw, sh = float(h["x"]), float(h["w"]), float(h["h"])
+            if sx + sw <= entry_x + 1e-9 or sx >= exit_x - 1e-9:
+                continue  # strip behind the entry or past the exit
+            if abs(float(h["y"]) + sh - top) > 1.0:
+                continue  # not a floor strip on this platform
+            x_lo, x_hi, _w = span_at_height(sh, tun)
+            w_lo = sx + sw + tun.player_w / 2.0 - x_hi
+            w_hi = sx - tun.player_w / 2.0 - x_lo
+            centre = 0.5 * (w_lo + w_hi)
+            k = round((centre - entry_x) / step)
+            tk = entry_x + k * step
+            if not (w_lo <= tk <= w_hi):
+                tk = centre
+            if tk < entry_x - 1e-9 or tk + air_dx > px + pw + 1e-9:
+                result["reason"] = ("mixed move inapplicable: strip jump "
+                                    "at x=%.2f cannot be placed" % sx)
+                return result
+            strip_jumps.append((tk, tk + air_dx, sx))
+        strip_jumps.sort()
+        result["spike_jumps"] = strip_jumps
+        # -- takeoff scan range (probe: swept zone +/- 60) ---------------
+        swept_lo, swept_hi = 1e9, -1e9
+        for _hi, h in seg_saws:
+            bb = saw_swept_bbox(h)
+            swept_lo = min(swept_lo, bb[0])
+            swept_hi = max(swept_hi, bb[0] + bb[2])
+        tk_lo = math.floor(swept_lo - MIXED_TAKEOFF_SCAN_PAD)
+        tk_hi = math.ceil(swept_hi + MIXED_TAKEOFF_SCAN_PAD)
+        saws = [h for _hi, h in seg_saws]
+        cache_key = (entry_x, exit_x, id(platform),
+                     tuple(sorted((hi, round(trig_map.get(id(h), 0.0), 6))
+                                 for hi, h in enumerate(hazards)
+                                 if id(h) in trig_map)),
+                     tuple(sorted(exclude_saws)))
+        if cache_key in self._mixed_cache:
+            cached = dict(self._mixed_cache[cache_key])
+            result.update(cached)
+            return result
+
+        def prect(fx, fy):
+            return (fx - tun.player_w / 2.0, fy - tun.player_h,
+                    tun.player_w, tun.player_h)
+
+        def jump_feet(fx, jump_tk):
+            """(feet_y, in_jump) for a jump from jump_tk at position
+            fx (§3 frame convention: frame f at x = tk + f*4.05,
+            feet = top + offs[f] for f = 0..22; f = 23 is the landing
+            frame, simulated as a grounded stance)."""
+            if jump_tk - 1e-9 <= fx <= jump_tk + air_dx + 1e-9:
+                f = int(round((fx - jump_tk) / step))
+                if f >= land_f + 1:
+                    return top, True
+                f = max(0, min(land_f, f))
+                return top + offs[f], True
+            return top, False
+
+        def sim(tk, phi):
+            """Unified 1/60 s all-hazard sim for (takeoff, phase).
+            Returns (clean, min_saw_clearance, ground_pass) or
+            (None, None, None) if the departure is infeasible.
+            Arc phase first (most selective), then run-in, then
+            walk-out; the verdict is order-independent (every phase
+            must be clean). Trig arming: approach-armed triggers
+            from trig_map, plus any trigger line in [entry_x, exit_x]
+            crossed at t_dep + (trigger_x - entry_x)/243 (the hero's
+            x(t) is linear throughout the segment, jumps included)."""
+            arrival = (tk - entry_x) / float(tun.run_speed)
+            n = 0
+            if phi < arrival - 1e-9:
+                n = math.ceil((arrival - phi) / period)
+            t_take = phi + n * period
+            t_dep = t_take - arrival
+            if t_dep < -1e-9:
+                return None, None, None
+            trig = dict(trig_map)
+            for h in hazards:
+                trig_x = h.get("trigger_x", h.get("drop_trigger_x"))
+                if trig_x is None or id(h) in trig:
+                    continue
+                trig_x = float(trig_x)
+                if entry_x - 1e-9 <= trig_x <= exit_x + 1e-9:
+                    trig[id(h)] = t_dep + (trig_x - entry_x) \
+                        / float(tun.run_speed)
+            jumps = list(strip_jumps)
+            jumps.append((tk, tk + air_dx, None))
+            # Sort by (takeoff, landing) only: a lattice takeoff can
+            # coincide with a strip jump's takeoff (same range), and
+            # the third elements (strip x vs None) are not comparable.
+            jumps.sort(key=lambda j: (j[0], j[1]))
+            min_clear = 1e9
+
+            def lethal(fx, fy, t):
+                pr = prect(fx, fy)
+                for h in hazards:
+                    if self._hazard_lethal_at(h, pr, t, trig.get(id(h))):
+                        return True
+                return False
+
+            def track_clear(fx, fy, t):
+                nonlocal min_clear
+                pr = prect(fx, fy)
+                for h in saws:
+                    cx, cy = saw_centre_at(h, t)
+                    min_clear = min(min_clear,
+                                    point_rect_dist(cx, cy, pr)
+                                    - float(h["r"]))
+
+            # (a) arc phase: t_take .. t_take + 23/60 (frames 0..23).
+            for kf in range(land_f + 2):
+                t = t_take + kf * dt
+                fx = tk + kf * step
+                fy = top if kf >= land_f + 1 else top + offs[kf]
+                if lethal(fx, fy, t):
+                    return False, 0.0, False
+                track_clear(fx, fy, t)
+            # landing must be on this platform (§3.5 feet-point
+            # landing rule: the landing feet-x on solid ground).
+            if not (px - 1e-9 <= tk + air_dx <= px + pw + 1e-9):
+                return False, 0.0, False
+            # (b) run-in: t_dep .. t_take (walking + strip jumps).
+            gp = False
+            prev_sign = {}
+            n_run = int(round((t_take - t_dep) / dt))
+            for k in range(n_run + 1):
+                t = t_dep + k * dt
+                fx = entry_x + float(tun.run_speed) * (t - t_dep)
+                fy = top
+                in_jump = False
+                for (a, lx, _s) in jumps:
+                    if a <= fx <= lx and not (a == tk and fx >= tk):
+                        fy, in_jump = jump_feet(fx, a)
+                        break
+                if not in_jump:
+                    if not (px - 1e-9 <= fx <= px + pw + 1e-9):
+                        return False, 0.0, False
+                if lethal(fx, fy, t):
+                    return False, 0.0, False
+                if not in_jump and fx < tk - 1e-9:
+                    for si, h in enumerate(saws):
+                        cx, _cy = saw_centre_at(h, t)
+                        d = fx - cx
+                        s = 1 if d > 0 else (-1 if d < 0 else 0)
+                        if s != 0:
+                            if prev_sign.get(si, 0) not in (0, s):
+                                gp = True
+                            prev_sign[si] = s
+                track_clear(fx, fy, t)
+            # (c) walk-out: t_take + 23/60 .. t_end (walking + strips).
+            t_end = t_dep + (exit_x - entry_x) / float(tun.run_speed)
+            t = t_take + (land_f + 1) * dt
+            while t <= t_end + 1e-9:
+                fx = entry_x + float(tun.run_speed) * (t - t_dep)
+                fy = top
+                in_jump = False
+                for (a, lx, _s) in jumps:
+                    if a <= fx <= lx:
+                        fy, in_jump = jump_feet(fx, a)
+                        break
+                if not in_jump:
+                    if not (px - 1e-9 <= fx <= px + pw + 1e-9):
+                        return False, 0.0, False
+                if lethal(fx, fy, t):
+                    return False, 0.0, False
+                track_clear(fx, fy, t)
+                t += dt
+            return True, min_clear, gp
+
+        def scan_grid(tk_list):
+            """Clean jump-over combos -> (masks, tks)."""
+            tks = []
+            masks = []
+            t0s = [j * dt for j in range(joint)]
+            for tk in tk_list:
+                tks.append(tk)
+                mask = 0
+                for j in range(joint):
+                    ok, _clear, gp = sim(round(tk, 4), round(j * dt, 6))
+                    if ok and not gp:
+                        mask |= (1 << j)
+                masks.append(mask)
+            return tks, t0s, masks
+
+        lattice_tks = []
+        k = 0
+        while True:
+            tk = entry_x + k * step
+            if tk > tk_hi + 1e-9:
+                break
+            if tk >= max(tk_lo, entry_x) - 1e-9 and tk <= exit_x + 1e-9:
+                lattice_tks.append(round(tk, 4))
+            k += 1
+        grids = {}
+        lat_tks, t0s, lat_masks = scan_grid(lattice_tks)
+        lat_rect = self._largest_floor_rectangle(lat_tks, t0s, lat_masks,
+                                                 step)
+        lat_centre = None
+        lat_pass = False
+        if lat_rect is not None:
+            ok, cc, _gp = sim(lat_rect["centre_takeoff"],
+                              lat_rect["centre_t0"])
+            lat_centre = cc if ok else None
+            lat_pass = ok and (lat_centre or 0.0) >= MIXED_FLOOR_CLEAR
+        grids["lattice"] = {"clean_jump_over": sum(bin(m).count("1")
+                                                   for m in lat_masks),
+                            "floor_rect": lat_rect,
+                            "centre_clearance": lat_centre,
+                            "floor_pass": lat_pass}
+        prim_pass = False
+        prim_rect = None
+        prim_centre = None
+        if lat_pass:
+            # Primary (1 px) grid is only needed when the lattice
+            # passes — both grids must pass, so a lattice failure
+            # settles the move without the 4x scan.
+            prim_tks = [float(x) for x in range(
+                int(math.ceil(max(tk_lo, entry_x))),
+                int(math.floor(min(tk_hi, exit_x))) + 1)]
+            pr_tks, _t0s, pr_masks = scan_grid(prim_tks)
+            prim_rect = self._largest_floor_rectangle(pr_tks, t0s,
+                                                      pr_masks, 1.0)
+            if prim_rect is not None:
+                ok, cc, _gp = sim(prim_rect["centre_takeoff"],
+                                  prim_rect["centre_t0"])
+                prim_centre = cc if ok else None
+                prim_pass = ok and (prim_centre or 0.0) \
+                    >= MIXED_FLOOR_CLEAR
+            grids["primary"] = {"clean_jump_over": sum(
+                bin(m).count("1") for m in pr_masks),
+                "floor_rect": prim_rect,
+                "centre_clearance": prim_centre,
+                "floor_pass": prim_pass}
+        else:
+            grids["primary"] = {"clean_jump_over": None,
+                                "floor_rect": None,
+                                "centre_clearance": None,
+                                "floor_pass": False,
+                                "skipped": "lattice floor failed"}
+        ok = lat_pass and prim_pass
+        result["grids"] = grids
+        if ok:
+            result["ok"] = True
+            result["centre_takeoff"] = lat_rect["centre_takeoff"]
+            result["centre_phase"] = lat_rect["centre_t0"]
+            result["Wx"] = lat_rect["takeoff_width"]
+            result["Wt"] = lat_rect["t0_width"]
+            result["centre_clearance"] = lat_centre
+            result["reason"] = ("mixed move PASS: lattice centre "
+                                "(%.2f, %.4f) clear %.2f; primary centre "
+                                "(%.2f, %.4f) clear %.2f"
+                                % (lat_rect["centre_takeoff"],
+                                   lat_rect["centre_t0"], lat_centre,
+                                   prim_rect["centre_takeoff"],
+                                   prim_rect["centre_t0"], prim_centre))
+        else:
+            result["reason"] = ("mixed move fails: lattice floor %s, "
+                                "primary floor %s"
+                                % (lat_pass, prim_pass))
+        self._mixed_cache[cache_key] = {
+            "ok": result["ok"], "reason": result["reason"],
+            "centre_takeoff": result["centre_takeoff"],
+            "centre_phase": result["centre_phase"],
+            "Wx": result["Wx"], "Wt": result["Wt"],
+            "centre_clearance": result["centre_clearance"],
+            "grids": grids, "period": period,
+            "joint_frames": joint, "spike_jumps": strip_jumps}
+        return result
+
+    def _check_timed_hazard_crossing(self, h, seg, top, is_edge, edge,
+                                     trig_map=None, platform=None):
         """Check one timed hazard on one walking segment / edge corridor.
 
-        seg: (x1, x2) crossed at feet level `top` (walking) or along the
-        jump arc (edge). Returns (ok, reason)."""
+        seg: (x1, x2) crossed at feet level `top` (walking) or along
+        the jump arc (edge). Returns (ok, reason).
+        trig_map (optional): approach-armed triggered hazards, as
+        {id(hazard): trig_time} on the same clock as the departure
+        time t0 (the caller computes it from the path intervals
+        before this check; the in-jump crossing is handled inside
+        _discrete_arc_clear). platform (optional): the platform rect
+        (dict with x/w, or (x, w)) the landing must lie on.
+        Stage 2 §2.1 guard: the walk jump-over branch is DISABLED for
+        moving saws (mixed-move path only). Stage 2 §3.3: the edge
+        branch uses the discrete arc (the parabola is gone); the 0.7 s
+        edge entry-clear test is unchanged (standing-at-entry, C4)."""
         tun = self.tun
+        offs, land_f, air_dx = self._traj()
         period = hazard_period(h)
         if h["type"] == "saw":
             bb = saw_swept_bbox(h)
@@ -1905,38 +2797,125 @@ class LevelCheck:
             return True, "hazard does not intersect segment"
         direction = 1 if seg[1] >= seg[0] else -1
         if is_edge:
+            # -- Stage 2 §3.3: fixed discrete edge arc ------------------
+            # The edge IS a jump: the hero takes off at tx and the
+            # discrete arc lands at tx + direction*93.15 (frame 23,
+            # grounded stance) on the landing platform — §4.2 pins
+            # this landing (the edge's own lx is the corridor end
+            # and is used only by the jumpability gate, not as the
+            # landing x: the graph's lx is the platform edge, which
+            # the §3 landing margin would reject). If |lx - tx| >
+            # 93.15 the edge is unjumpable by the discrete arc
+            # (defence-in-depth; schema-legal edges have
+            # |lx - tx| <= max_jump_dist 89.07 < 93.15).
+            self._edge_choice = None
             (tx, ty), (lx, ly) = edge["takeoff"], edge["land"]
-            dist = abs(lx - tx) or 1.0
-            duration = dist / tun.run_speed
-            arc = list(self._arc_samples(tx, ty, lx, ly, n=21))
-
-            def xs(f, arc=arc):
-                i = min(len(arc) - 1, int(f * (len(arc) - 1)))
-                return arc[i][0]
-
-            def ys(f, arc=arc):
-                i = min(len(arc) - 1, int(f * (len(arc) - 1)))
-                return arc[i][1]
-        else:
-            start = zx1 if direction > 0 else zx2
-            end = zx2 if direction > 0 else zx1
-            duration = abs(end - start) / tun.run_speed
-
-            def xs(f, s=start, e=end):
-                return s + (e - s) * f
-
-            def ys(f, top=top):
-                return top
-        clean, window, detail = self._crossing_simulation(
-            h, xs, ys, max(duration, 0.05), period)
-        if is_edge:
-            if not clean:
-                return False, "timed %s: %s" % (h["type"], detail)
+            span = abs(lx - tx)
+            if span > air_dx + 1e-9:
+                return False, ("timed %s: edge span %.2f > discrete "
+                               "jump 93.15" % (h["type"], span))
+            entry_prect = (tx - tun.player_w / 2.0, ty - tun.player_h,
+                           tun.player_w, tun.player_h)
+            window = self._entry_clear_window(h, entry_prect, period)
+            land_x = tx + direction * air_dx
+            land_platform = platform
+            if land_platform is None and edge is not None:
+                # Reconstruct the landing platform's position rect
+                # from the edge's land point + the base width
+                # (moving platforms keep their size, only the
+                # position moves): rightward land = left edge,
+                # leftward land = right edge.
+                pb = self.lv["platforms"][edge["b"]]
+                bw = float(pb["w"])
+                if direction > 0:
+                    land_platform = (lx, bw)
+                else:
+                    land_platform = (lx - bw, bw)
+            if span < 1e-9:
+                # Overlap edge (tx == lx): no jump — the hero walks
+                # across the overlap. The check is a stance check at
+                # the crossing point (the original parabola was a
+                # degenerate point here): a clean stance at some
+                # phase, plus the unchanged 0.7 s entry-clear test.
+                best_t0, best_clear = None, None
+                starts = [i * 0.05 for i in
+                          range(int((period or 0.05) / 0.05) + 1)] \
+                    if period else [0.0]
+                for t0 in starts:
+                    if not self._hazard_lethal_at(
+                            h, entry_prect, t0,
+                            (trig_map or {}).get(id(h))):
+                        if h.get("type") == "saw":
+                            cx, cy = saw_centre_at(h, t0)
+                            d = point_rect_dist(cx, cy, entry_prect) \
+                                - float(h["r"])
+                        else:
+                            d = 1e9
+                        if best_clear is None or d > best_clear:
+                            best_t0, best_clear = t0, d
+                if best_t0 is None:
+                    return False, ("timed %s: no clean stance at the "
+                                   "overlap crossing (entry clear %.2fs)"
+                                   % (h["type"], window))
+                if period and window < tun.min_window:
+                    return False, ("timed %s: safe window %.2fs < %.2fs "
+                                   "(overlap crossing)"
+                                   % (h["type"], window, tun.min_window))
+                self._edge_choice = {"t0": best_t0, "takeoff": tx,
+                                     "landing_x": tx,
+                                     "landing_phase": (best_t0 % period)
+                                     if period else 0.0,
+                                     "saw": h, "clearance": best_clear}
+                return True, ("timed %s ok: clean stance at overlap "
+                              "crossing from t0=%.2fs; entry clear %.2fs"
+                              % (h["type"], best_t0, window))
+            # t0 scan (0.05 s steps over one period, mirroring the
+            # entry-clear sampling): the best-clearance departure.
+            best_t0, best_clear, best_detail = None, None, None
+            starts = [i * 0.05 for i in
+                      range(int((period or 0.05) / 0.05) + 1)] \
+                if period else [0.0]
+            for t0 in starts:
+                ok, clear, detail = self._discrete_arc_clear(
+                    tx, land_x, ty, [h], t0=t0, landing_top=ly,
+                    landing_platform=land_platform, trig_map=trig_map,
+                    stance_hazards=[h])
+                if ok and (best_clear is None or
+                           (clear or 0.0) > best_clear):
+                    best_t0, best_clear, best_detail = t0, clear, detail
+            if best_t0 is None:
+                return False, ("timed %s: no clean discrete arc "
+                               "(entry clear %.2fs)"
+                               % (h["type"], window))
             if period and window < tun.min_window:
                 return False, ("timed %s: safe window %.2fs < %.2fs "
-                               "(%s)" % (h["type"], window, tun.min_window,
-                                         detail))
-            return True, "timed %s ok: %s" % (h["type"], detail)
+                               "(discrete arc: %s)"
+                               % (h["type"], window, tun.min_window,
+                                  best_detail))
+            self._edge_choice = {"t0": best_t0, "takeoff": tx,
+                                 "landing_x": land_x,
+                                 "landing_phase": ((best_t0 + 23.0 / 60.0)
+                                                  % period)
+                                 if period else 0.0,
+                                 "saw": h, "clearance": best_clear}
+            return True, ("timed %s ok: clean discrete arc from "
+                          "t0=%.2fs (clear %s); entry clear %.2fs"
+                          % (h["type"], best_t0,
+                             ("%.2f" % best_clear)
+                             if best_clear is not None else "n/a",
+                             window))
+        # -- Walking segment ----------------------------------------------
+        start = zx1 if direction > 0 else zx2
+        end = zx2 if direction > 0 else zx1
+        duration = abs(end - start) / tun.run_speed
+
+        def xs(f, s=start, e=end):
+            return s + (e - s) * f
+
+        def ys(f, top=top):
+            return top
+        clean, window, detail = self._crossing_simulation(
+            h, xs, ys, max(duration, 0.05), period)
         # Walking segment: try walking through, then jumping over the
         # zone (the real move for head-height saws / floor spike strips).
         walk_ok = clean and (not period or window >= tun.min_window)
@@ -1945,29 +2924,104 @@ class LevelCheck:
         jump_detail = "jump-over not attempted"
         jump_ok = False
         jump_window = 0.0
-        tx0 = max(x1, zx1 - 30.0)
-        lx0 = min(x2, zx2 + 30.0)
-        span = lx0 - tx0
-        if 40.0 <= span <= tun.max_jump_dist:
-            arc = list(self._arc_samples(tx0, top, lx0, top, n=21))
-            jdur = span / tun.run_speed
-
-            def jxs(f, arc=arc):
-                return arc[min(len(arc) - 1, int(f * (len(arc) - 1)))][0]
-
-            def jys(f, arc=arc):
-                return arc[min(len(arc) - 1, int(f * (len(arc) - 1)))][1]
-
-            jclean, jump_window, jump_detail = self._crossing_simulation(
-                h, jxs, jys, max(jdur, 0.05), period)
-            jump_ok = jclean and (not period
-                                  or jump_window >= tun.min_window)
-            if jump_ok:
-                return True, "timed %s ok via jump-over: %s" \
-                    % (h["type"], jump_detail)
-        elif span > tun.max_jump_dist:
-            jump_detail = ("jump-over impossible: span %.0f > max jump "
-                           "distance %.0f" % (span, tun.max_jump_dist))
+        is_moving_saw = h.get("type") == "saw" and ("path" in h
+                                                    or "swing" in h)
+        if is_moving_saw:
+            # Stage 2 §2.1 guard: the parabola jump-over branch is
+            # DISABLED for moving saws — the mixed move is the only
+            # jump-over path for them (defence-in-depth; §2.2 proves
+            # the branch is dead for schema-legal saws on unclamped
+            # segments anyway).
+            jump_detail = "moving saw: mixed-move path only"
+        else:
+            # Stage 2 §3.2: for non-saw timed hazards the parabola is
+            # replaced by the discrete arc over the takeoff lattice
+            # anchored at the segment entry (step 4.05 px). Span gate
+            # moves 89.07 -> 93.15 (S2: attempt-gate only; the
+            # per-frame clearance scan + landing rule remain the
+            # judge). The takeoff must be before the zone (arc starts
+            # before it) and the landing past the zone, both inside
+            # the segment.
+            tx0 = max(x1, zx1 - 30.0)
+            lx0 = min(x2, zx2 + 30.0)
+            span = lx0 - tx0
+            if 40.0 <= span <= air_dx:
+                entry_x = seg[0]
+                if direction > 0:
+                    tk_lo = max(x1, zx2 - air_dx)
+                    tk_hi = min(zx1, x2 - air_dx)
+                else:
+                    tk_lo = max(zx2, x1 + air_dx)
+                    tk_hi = min(x2, zx1 + air_dx)
+                best_tk, best_t0, best_clear = None, None, None
+                best_window = 0.0
+                k = 0
+                while True:
+                    tk = entry_x + direction * k * (
+                        float(tun.run_speed) / 60.0)
+                    if (direction > 0 and tk > tk_hi + 1e-9) or \
+                            (direction < 0 and tk < tk_lo - 1e-9):
+                        break
+                    if tk_lo - 1e-9 <= tk <= tk_hi + 1e-9:
+                        tk_prect = (tk - tun.player_w / 2.0,
+                                    top - tun.player_h,
+                                    tun.player_w, tun.player_h)
+                        tk_window = self._entry_clear_window(
+                            h, tk_prect, period)
+                        if not period or tk_window >= tun.min_window:
+                            # Approach trig_map on the segment-entry
+                            # clock (t=0 at the entry): a trigger
+                            # crossed while walking to the takeoff
+                            # fires at |trigger_x - entry_x| / 243.
+                            wtrig = {}
+                            for h2 in self.lv.get("hazards", []):
+                                tx2 = h2.get(
+                                    "trigger_x",
+                                    h2.get("drop_trigger_x"))
+                                if tx2 is None:
+                                    continue
+                                tx2 = float(tx2)
+                                lo = min(entry_x, tk)
+                                hi = max(entry_x, tk)
+                                if lo - 1e-9 <= tx2 <= hi + 1e-9:
+                                    wtrig[id(h2)] = abs(tx2 - entry_x) \
+                                        / float(tun.run_speed)
+                            starts = [i * 0.05 for i in range(
+                                int((period or 0.05) / 0.05) + 1)] \
+                                if period else [0.0]
+                            for t0 in starts:
+                                ok, clear, _d = \
+                                    self._discrete_arc_clear(
+                                        tk, tk + direction * air_dx,
+                                        top, [h], t0=t0,
+                                        landing_top=top,
+                                        landing_platform=platform,
+                                        trig_map=wtrig,
+                                        stance_hazards=[h])
+                                if ok and (best_clear is None or
+                                           (clear or 0.0) > best_clear):
+                                    best_tk, best_t0 = tk, t0
+                                    best_clear = clear
+                                    best_window = tk_window
+                    k += 1
+                if best_tk is not None:
+                    jump_ok = True
+                    jump_window = best_window
+                    jump_detail = ("discrete arc clear from takeoff "
+                                   "%.2f t0=%.2fs (clear %s)"
+                                   % (best_tk, best_t0,
+                                      ("%.2f" % best_clear)
+                                      if best_clear is not None else "n/a"))
+                else:
+                    jump_detail = ("discrete arc: no clean takeoff "
+                                   "on the lattice (span %.0f)"
+                                   % span)
+            elif span > air_dx:
+                jump_detail = ("jump-over impossible: span %.0f > "
+                               "discrete jump 93.15" % span)
+        if jump_ok:
+            return True, "timed %s ok via jump-over: %s" \
+                % (h["type"], jump_detail)
         if (clean or jump_ok or "clean crossing" in jump_detail) \
                 and period and max(window, jump_window) < tun.min_window:
             return False, ("timed %s: safe window %.2fs < %.2fs "
@@ -2010,13 +3064,32 @@ class LevelCheck:
 
     def check_path_windows(self, path):
         """Window checks for one candidate path. Returns list of failures
-        (empty = path is viable) and notes."""
+        (empty = path is viable) and notes.
+
+        Stage 2 restructure (the segment loop and the edge loop keep
+        their original order of failures/notes; the edge timed checks
+        are computed in a PRE-PASS because the §4.3 walk-out followup
+        needs the edge check's chosen t0 + landing before the segment
+        loop runs):
+        - Pass 0: segment/edge metadata + the ordered x-intervals the
+          hero traverses (for the trig_map approach test).
+        - Pre-pass: edge timed checks (trig_map from the prefix
+          intervals); records the §4.3 followup for any edge whose
+          landing lies inside a crossed moving saw's swept zone.
+        - Loop 1 (segments): node timing, static hazards, the mixed
+          move FIRST for a segment containing a moving saw, then the
+          timed checks (skipping saws admitted by the mixed move and
+          saws covered by the followup — the followup replaces their
+          timed check).
+        - Loop 2 (edges): replay the pre-pass results in order.
+        """
         tun = self.tun
         failures, notes = [], []
         lv = self.lv
-        # Walking segments + edge crossings.
+        # -- Pass 0: segment metadata + ordered traversal intervals ----
+        segments = []
         for si, node in enumerate(path):
-            p = self.lv["platforms"][node]
+            p = lv["platforms"][node]
             top = float(p["y"])
             # Entry / exit x on this platform.
             if si == 0:
@@ -2027,6 +3100,74 @@ class LevelCheck:
                 exit_x = float(lv["door"]["x"])
             else:
                 exit_x = self.edges[(node, path[si + 1])]["takeoff"][0]
+            segments.append((node, p, top, entry_x, exit_x))
+        # Intervals in traversal order: seg0, edge0, seg1, edge1, ...
+        intervals = []
+        for si, (_n, _p, _t, entry_x, exit_x) in enumerate(segments):
+            intervals.append((min(entry_x, exit_x),
+                              max(entry_x, exit_x)))
+            if si < len(path) - 1:
+                edge = self.edges[(path[si], path[si + 1])]
+                tx, lx = edge["takeoff"][0], edge["land"][0]
+                intervals.append((min(tx, lx), max(tx, lx)))
+
+        def trig_map_for(prefix, dep_x):
+            """Approach-armed triggered hazards (f.py rule): armed
+            iff the trigger line was crossed in `prefix`, with
+            trig_time = -|dep_x - trigger_x| / 243 (the arrival
+            clock: t=0 at dep_x)."""
+            m = {}
+            for h in lv.get("hazards", []):
+                trig_x = h.get("trigger_x", h.get("drop_trigger_x"))
+                if trig_x is None:
+                    continue
+                trig_x = float(trig_x)
+                if any(lo - 1e-9 <= trig_x <= hi + 1e-9
+                       for (lo, hi) in prefix):
+                    m[id(h)] = -abs(dep_x - trig_x) \
+                        / float(tun.run_speed)
+            return m
+
+        # -- Pre-pass: edge timed checks + §4.3 followup info ----------
+        edge_results = {}
+        followup = {}
+        for si in range(len(path) - 1):
+            edge = self.edges[(path[si], path[si + 1])]
+            prefix = intervals[:2 * si + 1]
+            etrig = trig_map_for(prefix, edge["takeoff"][0])
+            results = []
+            for item in edge["timed"]:
+                if isinstance(item, str):
+                    continue  # platform timing handled above
+                h = lv["hazards"][item]
+                seg = (edge["takeoff"][0], edge["land"][0])
+                self._edge_choice = None
+                ok, msg = self._check_timed_hazard_crossing(
+                    h, seg, edge["takeoff"][1], True, edge,
+                    trig_map=etrig, platform=None)
+                results.append((ok, msg))
+                # §4.3 followup (S1): if this edge crossed a moving
+                # saw and the landing lies inside that saw's swept
+                # zone, the following segment's timed check for THAT
+                # saw is replaced by the walk-out followup from the
+                # landing x/phase (centre landing only; t0 = the edge
+                # check's chosen t0).
+                choice = self._edge_choice
+                if ok and choice is not None \
+                        and h.get("type") == "saw" \
+                        and ("path" in h or "swing" in h):
+                    land_x = choice["landing_x"]
+                    r = float(h["r"])
+                    xs = [c[0] for c in saw_sweep_centres(h)]
+                    lo = min(xs) - r
+                    hi = max(xs) + r
+                    if land_x - tun.player_w / 2.0 <= hi and \
+                            land_x + tun.player_w / 2.0 >= lo:
+                        followup.setdefault(si + 1, {})[item] = (
+                            land_x, choice["landing_phase"], h)
+            edge_results[si] = results
+        # -- Loop 1: walking segments -----------------------------------
+        for si, (node, p, top, entry_x, exit_x) in enumerate(segments):
             seg = (entry_x, exit_x)
             seg_len = abs(exit_x - entry_x)
             ok, msg = self._check_node_timing(node, seg_len)
@@ -2034,6 +3175,25 @@ class LevelCheck:
                 failures.append(msg)
             band = (min(seg), top - tun.player_h, max(seg_len, 1.0),
                     tun.player_h)
+            # Stage 2 §2: the mixed move FIRST for a segment
+            # containing a moving saw; the walk branch is the
+            # fall-through. Saws covered by the §4.3 followup are
+            # excluded (their crossing is judged there).
+            followup_saws = followup.get(si, {})
+            mixed = None
+            seg_has_moving_saw = any(
+                h.get("type") == "saw"
+                and ("path" in h or "swing" in h)
+                and hi not in followup_saws
+                and rects_overlap(saw_swept_bbox(h), band)
+                for hi, h in enumerate(lv["hazards"]))
+            if seg_has_moving_saw:
+                mixed = self._check_mixed_saw_crossing(
+                    entry_x, exit_x, top, p, intervals[:2 * si],
+                    exclude_saws=frozenset(followup_saws))
+                if mixed["ok"]:
+                    notes.append("mixed saw crossing: %s"
+                                 % mixed["reason"])
             for hi, h in enumerate(lv["hazards"]):
                 t = h.get("type")
                 # Static hazards on the walking band.
@@ -2101,29 +3261,59 @@ class LevelCheck:
                     if circle_rect_overlap(float(h["x"]), float(h["y"]),
                                            float(h["r"]), band):
                         # Jump-over test across the saw on this platform.
+                        # Stage 2 §3.1: the 11-point parabola is replaced
+                        # by the discrete-arc prefix over the takeoff
+                        # lattice anchored at the segment entry (step
+                        # 4.05 px). The fixed span cx +/- (r+30) is
+                        # DELETED: the scan finds any takeoff whose
+                        # discrete arc clears the disc and lands on
+                        # the same platform (landing rule §3.5
+                        # feet-point: landing feet-x on solid ground).
                         cx, r = float(h["x"]), float(h["r"])
-                        tx, lx = cx - r - 30, cx + r + 30
-                        if tx < float(p["x"]) or lx > float(p["x"]) \
-                                + float(p["w"]):
-                            failures.append(
-                                "walking path on platforms[%d] blocked by "
-                                "static saw hazards[%d]" % (node, hi))
+                        _offs, _lf, air_dx = self._traj()
+                        direction = 1 if exit_x >= entry_x else -1
+                        if direction > 0:
+                            tk_lo = max(cx + r - air_dx, entry_x)
+                            tk_hi = min(cx - r, exit_x)
                         else:
-                            blocked = False
-                            for (sx, sy) in self._arc_samples(tx, top, lx,
-                                                              top):
-                                prect = (sx - tun.player_w / 2.0,
-                                         sy - tun.player_h, tun.player_w,
-                                         tun.player_h)
-                                if circle_rect_overlap(
-                                        cx, float(h["y"]), r, prect):
-                                    blocked = True
+                            tk_lo = max(cx + r, exit_x)
+                            tk_hi = min(cx - r + air_dx, entry_x)
+                        cleared = False
+                        best_clear = None
+                        k = 0
+                        while True:
+                            tk = entry_x + direction * k * (
+                                float(tun.run_speed) / 60.0)
+                            if (direction > 0 and tk > tk_hi + 1e-9) \
+                                    or (direction < 0
+                                        and tk < tk_lo - 1e-9):
+                                break
+                            if tk_lo - 1e-9 <= tk <= tk_hi + 1e-9:
+                                ok, clear, _d = \
+                                    self._discrete_arc_clear(
+                                        tk, tk + direction * air_dx,
+                                        top, [h], t0=None,
+                                        landing_top=top,
+                                        landing_platform=p,
+                                        stance_hazards=[h])
+                                if ok:
+                                    cleared = True
+                                    best_clear = clear
                                     break
-                            if blocked:
-                                failures.append(
-                                    "walking path on platforms[%d] blocked "
-                                    "by static saw hazards[%d] (jump arc "
-                                    "does not clear it)" % (node, hi))
+                                if clear is not None and (
+                                        best_clear is None
+                                        or clear > best_clear):
+                                    best_clear = clear
+                            k += 1
+                        if not cleared:
+                            failures.append(
+                                "walking path on platforms[%d] blocked "
+                                "by static saw hazards[%d] (discrete "
+                                "jump arc does not clear it; best "
+                                "clearance %s)"
+                                % (node, hi,
+                                   ("%.2f" % best_clear)
+                                   if best_clear is not None else "n/a"))
                 elif t == "hanging_pillar":
                     r = (float(h["x"]), float(h["y"]), float(h["w"]),
                          float(h["h"]))
@@ -2149,22 +3339,38 @@ class LevelCheck:
                          float(h["h"]))
                     timed_here = rects_overlap(r, band)
                 if timed_here:
+                    if hi in followup_saws:
+                        # §4.3: the walk-out followup REPLACES the
+                        # timed check for this saw on this segment.
+                        land_x, land_phase, saw = followup_saws[hi]
+                        direction = 1 if exit_x >= entry_x else -1
+                        ok, fmsg = self._walkout_followup(
+                            saw, land_x, land_phase, top, p, direction)
+                        if not ok:
+                            failures.append(
+                                "edge %d->%d walk-out followup: %s"
+                                % (path[si - 1], node, fmsg))
+                        else:
+                            notes.append(
+                                "edge %d->%d walk-out followup: %s"
+                                % (path[si - 1], node, fmsg))
+                        continue
+                    if mixed is not None and mixed["ok"] \
+                            and h.get("type") == "saw" \
+                            and ("path" in h or "swing" in h):
+                        # Admitted by the mixed move (the segment's
+                        # moving saw(s)); the walk timed check is the
+                        # fall-through for a failed mixed move only.
+                        continue
                     ok, msg = self._check_timed_hazard_crossing(
-                        h, seg, top, False, None)
+                        h, seg, top, False, None, platform=p)
                     if not ok:
                         failures.append(msg)
                     else:
                         notes.append(msg)
-        # Edge-corridor timed crossings.
+        # -- Loop 2: edge-corridor timed crossings (replay pre-pass) ---
         for si in range(len(path) - 1):
-            edge = self.edges[(path[si], path[si + 1])]
-            for item in edge["timed"]:
-                if isinstance(item, str):
-                    continue  # platform timing handled above
-                h = lv["hazards"][item]
-                seg = (edge["takeoff"][0], edge["land"][0])
-                ok, msg = self._check_timed_hazard_crossing(
-                    h, seg, edge["takeoff"][1], True, edge)
+            for (ok, msg) in edge_results[si]:
                 if not ok:
                     failures.append("edge %d->%d: %s"
                                     % (path[si], path[si + 1], msg))

@@ -8,6 +8,13 @@ extends Node2D
 # 8-16px, 200-700 px/s, 0.45s life, harder gravity. Draw-only: no
 # collision, no gameplay effect. `alive_count` exposes the live
 # particle count for probes; `active` is true while any particle lives.
+#
+# EFFEKSEER (Lane 7, v1.0.5): the burst is drawn by the authored
+# res://assets/effects/death_burst.efkefc (30 black squares, same motion
+# model as the code burst). `alive_count` mirrors the live Effekseer
+# particles (30 while the emitter plays, 0 when done). If the plugin or
+# the effect is unavailable, spawn_burst falls back to the code-drawn
+# burst below — never a crash, never a missing burst.
 
 const BURST_N := 30
 const BURST_LIFE := 0.45
@@ -15,6 +22,8 @@ const BURST_LIFE := 0.45
 var _parts: Array = []
 var alive_count := 0
 var active := false
+var _fx_mode := false
+var _emitter: Node = null
 
 
 func _init() -> void:
@@ -24,6 +33,20 @@ func _init() -> void:
 
 func spawn_burst(at: Vector2) -> void:
 	_parts = []
+	_emitter = null
+	_fx_mode = false
+	# Effekseer first; the code burst below stays as the fallback.
+	var fx := EffekseerFX.death_effect()
+	if fx != null:
+		var e := EffekseerFX.spawn_one_shot(fx, self, to_local(at), Color(1, 1, 1))
+		if e != null:
+			_emitter = e
+			_fx_mode = true
+			alive_count = BURST_N
+			active = true
+			set_process(true)
+			queue_redraw()
+			return
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(Time.get_ticks_msec()) + int(at.x) * 7 + int(at.y) * 13
 	for i in range(BURST_N):
@@ -42,6 +65,16 @@ func spawn_burst(at: Vector2) -> void:
 
 
 func _process(delta: float) -> void:
+	if _fx_mode:
+		# Effekseer draws; mirror its live state for probes.
+		if _emitter != null and is_instance_valid(_emitter) and bool(_emitter.call("is_playing")):
+			alive_count = BURST_N
+			return
+		alive_count = 0
+		active = false
+		_emitter = null
+		set_process(false)
+		return
 	if _parts.is_empty():
 		active = false
 		alive_count = 0
@@ -64,6 +97,8 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
+	if _fx_mode:
+		return  # Effekseer draws the burst; nothing to draw here.
 	for p in _parts:
 		var d: Dictionary = p
 		var s := float(d["size"])

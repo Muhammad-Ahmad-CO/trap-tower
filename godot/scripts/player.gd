@@ -46,9 +46,30 @@ var _dark_bg := false
 var _squash := 0.0
 var _sq_x := 1.0
 var _sq_y := 1.0
+# Lane F1 skins (VISUAL ONLY): body colour / accent / shape extras.
+# Defaults are the original pure-black classic hero; apply_skin is
+# called by the game node from the saved selection. The collision
+# shape (pw x ph), speed and jump are never touched here.
+var _skin_body := HERO_COL
+var _skin_accent := Color(1, 1, 1)
+var _skin_shape := "classic"
+
+
+func apply_skin(skin: Dictionary) -> void:
+	_skin_body = TTuning.col(str(skin.get("body", "#000000")))
+	_skin_accent = TTuning.col(str(skin.get("accent", "#FFFFFF")))
+	_skin_shape = str(skin.get("shape", "classic"))
+	queue_redraw()
 # EXCEED landing dust (draw-only): white puffs at the feet on hard
 # landings; they rise slightly, fade in ~0.35s, never touch physics.
+# EFFEKSEER (Lane 7, v1.0.5): the puffs are drawn by the authored
+# res://assets/effects/landing_dust.efkefc (6 soft circles, same motion
+# model). The _dust entries stay as the live record (probes read their
+# count) and decay in _update_dust as before; _draw_dust skips drawing
+# them while _dust_fx is true. If the effect is unavailable, the code
+# puffs draw exactly as before.
 var _dust: Array = []
+var _dust_fx := false
 
 
 func setup(tuning: Dictionary) -> void:
@@ -125,10 +146,14 @@ func _spawn_dust() -> void:
 			"life": 0.35,
 			"max_life": 0.35,
 		})
+	# Effekseer dust at the feet (local pos); falls back to the code
+	# puffs above when the effect is unavailable.
+	_dust_fx = EffekseerFX.spawn_dust(self, Vector2(0, ph * 0.5))
 
 
 func _update_dust(delta: float) -> void:
 	if _dust.is_empty():
+		_dust_fx = false
 		return
 	var keep: Array = []
 	for d in _dust:
@@ -139,6 +164,8 @@ func _update_dust(delta: float) -> void:
 		if float(dd["life"]) > 0.0:
 			keep.append(dd)
 	_dust = keep
+	if _dust.is_empty():
+		_dust_fx = false
 
 
 func feet_pos() -> Vector2:
@@ -205,13 +232,20 @@ func _draw() -> void:
 	# visible in screenshots.
 	_sq_x = 1.0 + 0.22 * _squash
 	_sq_y = 1.0 - 0.18 * _squash
+	# Outline pass: white on dark backgrounds (as before), and a dark
+	# outline for light skins (GHOST/GOLD) on light backgrounds, so a
+	# pale hero never vanishes into a pale level.
 	if _dark_bg:
 		_draw_pose(OUTLINE_COL, 1.5)
-	_draw_pose(HERO_COL, 0.0)
+	elif _rel_luminance(_skin_body) > 0.6:
+		_draw_pose(Color(0.10, 0.10, 0.18), 1.5)
+	_draw_pose(_skin_body, 0.0)
 	_draw_dust()
 
 
 func _draw_dust() -> void:
+	if _dust_fx:
+		return  # Effekseer draws the puffs; nothing to draw here.
 	for d in _dust:
 		var dd: Dictionary = d
 		var a := clampf(float(dd["life"]) / float(dd["max_life"]), 0.0, 1.0) * 0.7
@@ -248,6 +282,23 @@ func _draw_pose(col: Color, grow: float) -> void:
 	var hand := _map(Vector2(facing * 6.0 - swing * 0.6, 3))
 	draw_line(shoulder, hand, col, 3.0 + grow * 2.0)
 	draw_circle(head_c, head_r, col)
+	# Skin shape extras (DRAW-ONLY, accent colour, inside the hero
+	# silhouette; the outline pass above must not draw them, so they
+	# only render on the body pass, grow == 0).
+	if grow == 0.0:
+		if _skin_shape == "stripe":
+			var s1 := _map(Vector2(-5, -1))
+			var s2 := _map(Vector2(5, -1))
+			draw_line(s1, s2, _skin_accent, 2.5)
+		elif _skin_shape == "cap":
+			var cap_c := _map(Vector2(0, -feet_y + 4.0))
+			draw_arc(cap_c, head_r - 1.0, PI * 1.05, PI * 1.95, 12, _skin_accent, 3.0, true)
+			draw_line(_map(Vector2(-6, -feet_y + 5.0)), _map(Vector2(6, -feet_y + 5.0)), _skin_accent, 2.5)
+		elif _skin_shape == "horns":
+			var hl := PackedVector2Array([_map(Vector2(-6, -feet_y + 7.0)), _map(Vector2(-4, -feet_y + 1.0)), _map(Vector2(-2, -feet_y + 7.0))])
+			var hr := PackedVector2Array([_map(Vector2(2, -feet_y + 7.0)), _map(Vector2(4, -feet_y + 1.0)), _map(Vector2(6, -feet_y + 7.0))])
+			draw_colored_polygon(hl, _skin_accent)
+			draw_colored_polygon(hr, _skin_accent)
 
 
 # Legs stop half a line-width short of the foot point so the drawn

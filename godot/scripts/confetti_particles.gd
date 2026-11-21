@@ -8,9 +8,17 @@ extends Node2D
 # fall with gravity and fade over ~0.9s. Draw-only: no collision, no
 # gameplay effect. `alive_count` exposes the live piece count for
 # probes; `active` is true while any piece lives.
+#
+# EFFEKSEER (Lane 7, v1.0.5): the burst is drawn by the authored
+# res://assets/effects/door_confetti.efkefc, spawned once per tint
+# (white / yellow / dark-red, 12 pieces each == 36). `alive_count`
+# mirrors the live Effekseer pieces (12 per playing emitter). If the
+# plugin or the effect is unavailable, spawn_burst falls back to the
+# code-drawn burst below — never a crash, never a missing burst.
 
 const PIECE_N := 36
 const PIECE_LIFE := 0.9
+const PIECES_PER_SPAWN := 12
 
 const COLOURS: Array[Color] = [
 	Color(1, 1, 1),
@@ -21,6 +29,8 @@ const COLOURS: Array[Color] = [
 var _pieces: Array = []
 var alive_count := 0
 var active := false
+var _fx_mode := false
+var _emitters: Array = []
 
 
 func _init() -> void:
@@ -30,6 +40,27 @@ func _init() -> void:
 
 func spawn_burst(at: Vector2) -> void:
 	_pieces = []
+	_emitters = []
+	_fx_mode = false
+	# Effekseer first (one 12-piece spawn per tint); the code burst
+	# below stays as the fallback.
+	var fx := EffekseerFX.confetti_effect()
+	if fx != null:
+		var ok := true
+		for tint in EffekseerFX.CONFETTI_COLOURS:
+			var e := EffekseerFX.spawn_one_shot(fx, self, to_local(at), tint)
+			if e == null:
+				ok = false
+				break
+			_emitters.append(e)
+		if ok:
+			_fx_mode = true
+			alive_count = PIECE_N
+			active = true
+			set_process(true)
+			queue_redraw()
+			return
+		_emitters = []
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(Time.get_ticks_msec()) + int(at.x) * 7 + int(at.y) * 13
 	for i in range(PIECE_N):
@@ -50,6 +81,18 @@ func spawn_burst(at: Vector2) -> void:
 
 
 func _process(delta: float) -> void:
+	if _fx_mode:
+		# Effekseer draws; mirror its live state for probes.
+		var n := 0
+		for e in _emitters:
+			if is_instance_valid(e) and bool(e.call("is_playing")):
+				n += PIECES_PER_SPAWN
+		alive_count = n
+		if n == 0:
+			active = false
+			_emitters = []
+			set_process(false)
+		return
 	if _pieces.is_empty():
 		active = false
 		alive_count = 0
@@ -72,6 +115,8 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
+	if _fx_mode:
+		return  # Effekseer draws the burst; nothing to draw here.
 	for p in _pieces:
 		var d: Dictionary = p
 		var s := float(d["size"])

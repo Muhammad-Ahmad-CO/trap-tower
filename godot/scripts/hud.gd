@@ -18,6 +18,7 @@ extends Node2D
 signal pause_pressed
 signal restart_pressed
 signal skip_pressed
+signal ghost_toggled(enabled: bool)
 
 # Fixed HUD accents (schema: independent of the level palette).
 const HUD_DARK_RED := Color(0.43, 0.04, 0.04)
@@ -116,22 +117,34 @@ class IconButton extends Control:
 			])
 			draw_colored_polygon(head, col)
 		elif kind == "exit":
-			# Door/arch on the right with a bold arrow exiting it
-			# leftward: reads as "exit to map" at 96x96. Thick
-			# strokes match the restart/wrench glyphs.
-			var door_tl := Vector2(c.x + 0.06 * u, c.y - 0.30 * u)
-			var door_w := 0.30 * u
-			var door_h := 0.60 * u
-			var arc_c := Vector2(door_tl.x + door_w * 0.5, door_tl.y + door_w * 0.5)
-			draw_arc(arc_c, door_w * 0.5, PI, TAU, 14, col, 0.11 * u, true)
-			draw_line(Vector2(door_tl.x, arc_c.y), Vector2(door_tl.x, door_tl.y + door_h), col, 0.11 * u, true)
-			draw_line(Vector2(door_tl.x + door_w, arc_c.y), Vector2(door_tl.x + door_w, door_tl.y + door_h), col, 0.11 * u, true)
+			# EXIT, unambiguous at 1x (O4 fix): a door arch whose
+			# right jamb is BROKEN where a bold arrow passes through
+			# it, pointing RIGHT out of the door — the arrow tip
+			# sticks out past the door frame, so it cannot read as
+			# "back" (left arrow) or a lowercase "n". Thick strokes
+			# match the restart/wrench glyphs. Restart/play untouched.
+			var hw := 0.28 * u
+			var top := c.y - 0.30 * u
+			var bot := c.y + 0.30 * u
+			var arc_c := Vector2(c.x, top + hw)
 			var ay := c.y
-			draw_line(Vector2(c.x + 0.24 * u, ay), Vector2(c.x - 0.16 * u, ay), col, 0.10 * u, true)
+			var w := 0.11 * u
+			draw_arc(arc_c, hw, PI, TAU, 16, col, w, true)
+			draw_line(Vector2(c.x - hw, arc_c.y), Vector2(c.x - hw, bot), col, w, true)
+			# Right jamb in two segments, gap at the arrow's height.
+			draw_line(Vector2(c.x + hw, arc_c.y), Vector2(c.x + hw, ay - 0.10 * u), col, w, true)
+			draw_line(Vector2(c.x + hw, ay + 0.10 * u), Vector2(c.x + hw, bot), col, w, true)
+			draw_line(Vector2(c.x - hw, bot), Vector2(c.x + hw, bot), col, w, true)
+			# N3: arrowhead enlarged (was tip +0.44u, half-height
+			# 0.15u; now +0.47u / 0.19u, shaft +0.30u at 0.11u) so
+			# it reads bigger at 1x on the 96px pause button; the
+			# tip still stops inside the button (edge is 0.50u).
+			# Arch + jambs + restart/play untouched.
+			draw_line(Vector2(c.x - 0.20 * u, ay), Vector2(c.x + 0.30 * u, ay), col, 0.11 * u, true)
 			var head2 := PackedVector2Array([
-				Vector2(c.x - 0.34 * u, ay),
-				Vector2(c.x - 0.14 * u, ay - 0.13 * u),
-				Vector2(c.x - 0.14 * u, ay + 0.13 * u),
+				Vector2(c.x + 0.47 * u, ay),
+				Vector2(c.x + 0.24 * u, ay - 0.19 * u),
+				Vector2(c.x + 0.24 * u, ay + 0.19 * u),
 			])
 			draw_colored_polygon(head2, col)
 		elif kind == "wrench":
@@ -143,10 +156,14 @@ class IconButton extends Control:
 
 
 var level_number := 1
+var _mode_text := ""
 var _deaths := 0
 var _pause_btn: IconButton = null
 var _restart_btn: IconButton = null
 var _skip_btn: IconButton = null
+var _ghost_btn: IconButton = null
+var _ghost_on := true
+var _has_ghost := false
 var _dead := false
 
 
@@ -154,9 +171,14 @@ func _init() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 
 
-func setup(_pal: Dictionary, p_level_number: int) -> void:
+func setup(_pal: Dictionary, p_level_number: int, p_has_ghost: bool = false, p_ghost_on: bool = true, p_mode_text: String = "") -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	level_number = p_level_number
+	_has_ghost = p_has_ghost
+	_ghost_on = p_ghost_on
+	# Lane F2: "DAILY" / "NIGHTMARE" tag under the level chip ("" =
+	# normal play, no tag). Drawing only; the chip is untouched.
+	_mode_text = p_mode_text
 	# Drawing only: HUD renders above all level art.
 	z_index = 100
 	_pause_btn = IconButton.new()
@@ -185,6 +207,21 @@ func setup(_pal: Dictionary, p_level_number: int) -> void:
 	_skip_btn.visible = false
 	_skip_btn.pressed.connect(_on_skip_btn)
 	add_child(_skip_btn)
+	# Lane F3 ghost toggle: top-right, left of SKIP (848..1012, SKIP
+	# starts at 1024). Shown ONLY when this level has a saved ghost;
+	# a level with no best run yet has nothing to toggle. ON = dark
+	# red fill + yellow text (matches the other HUD buttons); OFF =
+	# dimmed grey so the state reads at a glance. The toggle only
+	# hides the ghost drawing — it never touches gameplay.
+	_ghost_btn = IconButton.new()
+	_ghost_btn.text = "GHOST"
+	_ghost_btn.font_size = 22
+	_ghost_btn.position = Vector2(848, 16)
+	_ghost_btn.size = Vector2(164, 48)
+	_ghost_btn.visible = _has_ghost
+	_ghost_btn.pressed.connect(_on_ghost_btn)
+	add_child(_ghost_btn)
+	_refresh_ghost_btn()
 
 
 func set_deaths(death_count: int) -> void:
@@ -201,6 +238,37 @@ func _refresh_skip() -> void:
 
 func is_skip_visible() -> bool:
 	return _skip_btn != null and _skip_btn.visible
+
+
+func is_ghost_visible() -> bool:
+	return _ghost_btn != null and _ghost_btn.visible
+
+
+func is_ghost_on() -> bool:
+	return _ghost_on
+
+
+func set_ghost(on: bool) -> void:
+	_ghost_on = on
+	_refresh_ghost_btn()
+
+
+func _refresh_ghost_btn() -> void:
+	if _ghost_btn == null:
+		return
+	if _ghost_on:
+		_ghost_btn.fill = HUD_DARK_RED
+		_ghost_btn.icon_col = HUD_YELLOW
+	else:
+		_ghost_btn.fill = Color(0.25, 0.25, 0.28)
+		_ghost_btn.icon_col = Color(0.75, 0.75, 0.78)
+	_ghost_btn.queue_redraw()
+
+
+func _on_ghost_btn() -> void:
+	_ghost_on = not _ghost_on
+	_refresh_ghost_btn()
+	ghost_toggled.emit(_ghost_on)
 
 
 # Death state: pause + restart (+ skip) hidden; only the top-centre
@@ -249,3 +317,7 @@ func _draw() -> void:
 	draw_style_box(sb, Rect2(x, top, chip_w, chip_h))
 	var ty := top + (chip_h - float(TTPixelFont.GLYPH_H * px)) * 0.5
 	TTPixelFont.draw_text(self, text, Vector2(x, ty), px, HUD_YELLOW, HORIZONTAL_ALIGNMENT_CENTER, chip_w)
+	if _mode_text != "":
+		# Mode tag under the chip (y 56..77, still inside the HUD
+		# band): small yellow pixel text, centred on the screen.
+		TTPixelFont.draw_text(self, _mode_text, Vector2(0, 56), 3, HUD_YELLOW, HORIZONTAL_ALIGNMENT_CENTER, 1280.0)

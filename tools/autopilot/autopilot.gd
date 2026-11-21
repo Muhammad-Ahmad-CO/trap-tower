@@ -26,8 +26,10 @@
 # picks a takeoff whose flight clears the obstacle(s) and lands in a
 # stance from which the next obstacle is itself jumpable (chained
 # obstacles). Timed moving/dashed crossings are solved as (departure,
-# t_dep) timed plans with a ride/exit policy; hanging pillars and
-# moving saws keep the greedy policy.
+# t_dep) timed plans with a ride/exit policy; hanging pillars keep
+# the greedy policy. Moving saws are solved by the Stage 1 (Path C)
+# run-in planner: the hero departs SAFE ground at t_dep so arrival
+# at the takeoff matches the saw phase (see _solve_saw_runin).
 # False negatives are acceptable (level simply doesn't ship). False
 # positives are not: a PASS requires reaching the door rect through
 # physics simulation.
@@ -257,6 +259,22 @@ var _flight_brake_x: float = -1.0
 var _flight_active: bool = false
 var _plan_t_dep: float = -1.0
 var _plan_timed_kind: String = ""
+# Stage 1 (Path C): run-in timing for a moving saw. _plan_t_dep is
+# REDEFINED for kind "saw_runin": the absolute time to LEAVE
+# _plan_dep_x (safe ground), NOT the time to jump while waiting at
+# the takeoff. _plan_x keeps its meaning (takeoff).
+var _plan_dep_x: float = 0.0
+var _plan_takeoff_time: float = -1.0
+var _plan_saw: Dictionary = {}
+# Solver re-entrancy guard (see _solve_saw_runin): while a solve is
+# in progress, _plan_required_runup uses a direct timed flight scan
+# instead of re-entering the solver (which would recurse through
+# _plan_followup_ok). Throttle for failed solves (one re-solve per
+# 24 px of approach; the plain planner re-checks every 4.05 px when
+# engaged, and a full coarse solve every frame would stall the run).
+var _saw_solve_depth: int = 0
+var _saw_last_solve_x: float = -1e9
+var _saw_last_solve_key: String = ""
 var _plan_board: bool = false
 var _plan_t_exit: float = -1.0  # mover exit time of a timed plan, or -1
 var _plan_blocked_by: String = ""  # column/strip no-window reason, or ""
@@ -447,6 +465,50 @@ func _shape_hits_rect(shape: Dictionary, rect: Rect2) -> bool:
 			rect.position.x + rect.size.x),
 			clampf(c.y, rect.position.y, rect.position.y + rect.size.y))
 	return closest.distance_to(c) < r
+
+
+# Stage 1 (Path C): time-aware shape test. Shapes carrying a "saw"
+# key are timed circles: the centre is _saw_centre(saw, t) (the same
+# sine/swing math as the checker) and the test is closest-distance <
+# shape["radius"] (the REAL r in flight, or land_radius when the
+# caller passes it as "radius" for a landing check). "rect" and
+# static "centre" shapes are tested exactly as _shape_hits_rect
+# tests them (same arithmetic, same strict <), so static behaviour
+# is unchanged; only the centre's time-dependence is new.
+func _shape_hits_rect_at(shape: Dictionary, rect: Rect2,
+		t: float) -> bool:
+	if shape.has("rect"):
+		return (shape["rect"] as Rect2).intersects(rect)
+	var c: Vector2
+	var r: float
+	if shape.has("saw"):
+		c = _saw_centre(shape["saw"], t)
+		r = float(shape["radius"])
+	else:
+		c = shape["centre"]
+		r = float(shape["radius"])
+	var closest := Vector2(clampf(c.x, rect.position.x,
+			rect.position.x + rect.size.x),
+			clampf(c.y, rect.position.y, rect.position.y + rect.size.y))
+	return closest.distance_to(c) < r
+
+
+# Stage 1: the period of a moving saw (path saw: h["period"];
+# swing saw: h["swing"]["period"]).
+func _saw_period(saw: Dictionary) -> float:
+	if saw.has("path"):
+		return float(saw.get("period", 0.0))
+	if saw.has("swing"):
+		return float((saw["swing"] as Dictionary).get("period", 0.0))
+	return 0.0
+
+
+# Stage 1: first timed-saw entry in a planner lethal array, or {}.
+func _first_timed_saw(lethal: Array) -> Dictionary:
+	for shape in lethal:
+		if shape.has("saw"):
+			return shape["saw"]
+	return {}
 
 
 func _current_platform_rects(level: Dictionary) -> Array:
@@ -1340,6 +1402,14 @@ func _mover_ride_state(level: Dictionary, feet: Vector2, on_floor: bool,
 				break
 		if on_solid:
 			continue
+		# Intra-mover walk target (moved up: the exit decisions
+		# below are gated on it): stand just inside the exit
+		# edge so the mover cannot slide out from under the hero
+		# (the D15S2 lip stranding: waiting still at x~327.3
+		# while the mover slid away).
+		var hw2: float = _plan_half_w()
+		var walk_to: float = r.position.x + r.size.x - hw2 - 1.0 \
+				if dir > 0.0 else r.position.x + hw2 + 1.0
 		var step_off: bool = false
 		var jump_off: bool = false
 		if dir > 0.0:
@@ -1354,7 +1424,14 @@ func _mover_ride_state(level: Dictionary, feet: Vector2, on_floor: bool,
 			if l2 < 1e8:
 				var edge: float = r.position.x + r.size.x
 				step_off = edge >= l2 - 8.0
-				jump_off = not step_off and (l2 - edge) <= 40.0
+				# Stage 2 pillar fix (L165): jump off only
+				# when the hero is AT the exit edge -- jumping
+				# from mid-ride lands ~5 px short of the far
+				# floor (the mover edge, not the hero, was in
+				# range). The ride branch walks the hero to
+				# walk_to first; the exit fires from there.
+				jump_off = not step_off and (l2 - edge) <= 40.0 \
+						and feet.x >= walk_to - 20.0
 		else:
 			var l2b: float = -1e9
 			for q in level["platforms"]:
@@ -1367,14 +1444,8 @@ func _mover_ride_state(level: Dictionary, feet: Vector2, on_floor: bool,
 			if l2b > -1e8:
 				var edge2: float = r.position.x
 				step_off = edge2 <= l2b + 8.0
-				jump_off = not step_off and (edge2 - l2b) <= 40.0
-		# Intra-mover walk target: stand just inside the exit
-		# edge so the mover cannot slide out from under the hero
-		# (the D15S2 lip stranding: waiting still at x~327.3
-		# while the mover slid away).
-		var hw2: float = _plan_half_w()
-		var walk_to: float = r.position.x + r.size.x - hw2 - 1.0 \
-				if dir > 0.0 else r.position.x + hw2 + 1.0
+				jump_off = not step_off and (edge2 - l2b) <= 40.0 \
+						and feet.x <= walk_to + 20.0
 		# Mountable higher destination in `dir` (top up to
 		# PLAN_MAX_RISE above the mover): the jump-off target.
 		var mount_dest: Dictionary = {}
@@ -1450,8 +1521,15 @@ func _plan_geometry(level: Dictionary, feet: Vector2,
 	# time (see the pillar branch below); the lethal loop turns
 	# them into static column obstacles.
 	var landed_pillars: Array = []
-	# Hanging pillars / moving saws ahead still disable the planner:
-	# their lethal timing stays the greedy policy's business.
+	# Hanging pillars ahead still disable the planner: their lethal
+	# timing stays the greedy policy's business. Moving saws do NOT
+	# disable it any more (Stage 1, Path C): when the disc's swept
+	# box can meet a body the planner could put there, the saw is
+	# recorded in timed_saws and the planner switches to timed-saw
+	# mode instead of returning ok:false (design §2.1). The
+	# swept-box/band test stays as the *trigger*; only the response
+	# changes.
+	var timed_saws: Array = []
 	# P5: scoped to the planning horizon (PLAN_HORIZON ahead),
 	# not ANY feature anywhere ahead. The old blanket disable
 	# killed the planner for the whole level (e.g. D07S3's stair
@@ -1499,6 +1577,39 @@ func _plan_geometry(level: Dictionary, feet: Vector2,
 					var cyc: float = fposmod(_elapsed
 							- float(h.get("phase", 0.0)), per)
 					if ht - cyc >= 0.75:
+						skip_disable = true
+				if not skip_disable:
+					# Stage 2 pillar fix (L121): a periodic pillar
+					# only disables the planner when it actually
+					# threatens the segment the planner must cross
+					# next -- from the hero to the far edge of the
+					# nearest spikes / spiked_column ahead (the
+					# run + flight + landing of the next jump),
+					# else one flight ahead. A pillar beyond that
+					# segment cannot touch any flight the planner
+					# can propose from here; the planner re-checks
+					# every 24 px, so it disengages again as the
+					# pillar enters the segment.
+					var hw_p: float = _plan_half_w()
+					var seg_end: float = feet.x + dir * 120.0
+					var seg_best: float = 120.0
+					for h2 in level["hazards"]:
+						var ty2: String = str(h2.get("type", ""))
+						if ty2 != "spikes" \
+								and ty2 != "spiked_column":
+							continue
+						var far2: float = float(h2["x"]) \
+								if dir > 0.0 \
+								else float(h2["x"]) + float(h2["w"])
+						var d2: float = (far2 - feet.x) * dir
+						if d2 < -28.0 or d2 > PLAN_HORIZON:
+							continue
+						if d2 < seg_best:
+							seg_best = d2
+							seg_end = far2
+					var seg_lo: float = minf(feet.x, seg_end) - hw_p
+					var seg_hi: float = maxf(feet.x, seg_end) + hw_p
+					if px1 < seg_lo or px0 > seg_hi:
 						skip_disable = true
 				if not skip_disable:
 					return {"ok": false}
@@ -1641,8 +1752,9 @@ func _plan_geometry(level: Dictionary, feet: Vector2,
 					or (dir < 0.0 and bx0 < feet.x \
 						and bx1 > feet.x - PLAN_HORIZON)
 			var y_hit: bool = by1 > band_top and by0 < band_bot
+			# Stage 1 (§2.1): timed-saw mode, not planner-off.
 			if x_hit and y_hit:
-				return {"ok": false}
+				timed_saws.append(h)
 	var lethal: Array = []
 	for h in level["hazards"]:
 		var typ: String = str(h.get("type", ""))
@@ -1669,6 +1781,18 @@ func _plan_geometry(level: Dictionary, feet: Vector2,
 								"kind": "spiked_column"})
 			continue
 		if typ == "saw" and (h.has("path") or h.has("swing")):
+			# Stage 1 (§2.1): a timed circle in the planner's
+			# lethal set, sampled per frame by _plan_flight via
+			# _shape_hits_rect_at. In-flight radius is the REAL r
+			# (the game's kills() test is closest-distance < r,
+			# no margin, same rule as static saws); land_radius
+			# (r + PLAN_MARGIN) guards only the landing check.
+			# This is a DIFFERENT collection from _lethal_shapes'
+			# {"centre", "timed"} entries (used by greedy sensing
+			# in _decide); do not conflate the two key shapes.
+			lethal.append({"saw": h, "radius": float(h["r"]),
+					"land_radius": float(h["r"]) + PLAN_MARGIN,
+					"timed": true, "kind": "saw_moving"})
 			continue
 		if typ == "spikes" or typ == "spiked_column":
 			# REAL rect for takeoff/standing/flight checks; the 4px
@@ -1707,7 +1831,8 @@ func _plan_geometry(level: Dictionary, feet: Vector2,
 						"radius": float(h["r"]),
 						"land_radius": float(h["r"]) + PLAN_MARGIN})
 	return {"ok": true, "lethal": lethal, "solids": solids,
-			"timed": timed, "flight_solids": flight_solids}
+			"timed": timed, "flight_solids": flight_solids,
+			"timed_saws": timed_saws, "landed_pillars": landed_pillars}
 
 
 func _plan_trajectory() -> Dictionary:
@@ -1792,11 +1917,16 @@ func _plan_flight(x0: float, y0: float, traj: Dictionary,
 		var x: float = x0 + float(dxs[f])
 		var feet: float = y0 + float(offs[f])
 		var rect := Rect2(x - hw, feet - ph, 2.0 * hw, ph)
-		for shape in lethal:
-			if _shape_hits_rect(shape, rect):
-				return {"ok": false, "fail_frame": f}
-		# Timed rects sampled at this flight frame's time.
+		# Stage 1 (§2.2): the time is computed BEFORE the lethal
+		# test (it used to be computed after it, so the test was
+		# time-blind). Timed circles are sampled at this frame's
+		# t; static shapes test identically to before.
 		var t: float = start_t + float(f) * PLAN_DT
+		for shape in lethal:
+			if _shape_hits_rect_at(shape, rect, t):
+				return {"ok": false, "fail_frame": f}
+		# Timed rects (moving platforms) are solid for this
+		# flight frame, sampled at the frame's time t.
 		var landable: Array = []
 		landable.append_array(solids)
 		var blocking: Array = []
@@ -1853,14 +1983,19 @@ func _plan_flight(x0: float, y0: float, traj: Dictionary,
 						# keep 4 px clear of the disc, while the
 						# in-flight check uses the real radius
 						# (P5: the margin erased the only crossing
-						# takeoffs for floor saws).
+						# takeoffs for floor saws). Stage 1: a
+						# timed disc's centre is evaluated at this
+						# frame's t, not at its rest centre.
 						var lshape: Dictionary = shape2
 						if shape2.has("land_rect"):
 							lshape = {"rect": shape2["land_rect"]}
+						elif shape2.has("saw"):
+							lshape = {"saw": shape2["saw"],
+									"radius": shape2["land_radius"]}
 						elif shape2.has("land_radius"):
 							lshape = {"centre": shape2["centre"],
 									"radius": shape2["land_radius"]}
-						if _shape_hits_rect(lshape, land_rect):
+						if _shape_hits_rect_at(lshape, land_rect, t):
 							return {"ok": false, "fail_frame": f}
 					for r2 in solids:
 						var rr2: Rect2 = r2
@@ -1957,7 +2092,7 @@ func _plan_flight(x0: float, y0: float, traj: Dictionary,
 
 func _plan_candidates(x0: float, y0: float, vx0: float, dir: float,
 		lethal: Array, solids: Array, timed: Array = [],
-		t_now: float = -1.0) -> Array:
+		t_now: float = -1.0, skip_timed_stance: bool = false) -> Array:
 	var hw: float = _plan_half_w()
 	var ph: float = _plan_height()
 	var speed: float = float(_player_cfg["run_speed"])
@@ -1969,7 +2104,25 @@ func _plan_candidates(x0: float, y0: float, vx0: float, dir: float,
 		var rect := Rect2(x - hw, y0 - ph, 2.0 * hw, ph)
 		var bad: bool = false
 		for shape in lethal:
-			if _shape_hits_rect(shape, rect):
+			# Stage 1 (§2.3): a timed disc is tested at the
+			# ARRIVAL time (now + travel at 243 px/s), not at
+			# its rest centre -- a stance clear now may be
+			# lethal when the hero gets there, and vice versa.
+			# skip_timed_stance is solver-only: the run-in
+			# solver departs at t_dep, so a stance's arrival
+			# time depends on the (takeoff, t_dep) combo being
+			# tested, not on an immediate run from `now`; the
+			# per-combo flight sim (frame 0 tests the takeoff
+			# rect against the disc at t_take) is the arbiter
+			# there instead. Static shapes keep the old test.
+			if shape.has("saw"):
+				if skip_timed_stance:
+					continue
+				var t_arrive: float = now + absf(x - x0) / speed
+				if _shape_hits_rect_at(shape, rect, t_arrive):
+					bad = true
+					break
+			elif _shape_hits_rect(shape, rect):
 				bad = true
 				break
 		if not bad:
@@ -2015,14 +2168,19 @@ func _plan_candidates(x0: float, y0: float, vx0: float, dir: float,
 
 
 func _plan_next_entry(land_x: float, land_y: float, lethal: Array,
-		solids: Array, dir: float, door_x: float) -> float:
+		solids: Array, dir: float, door_x: float,
+		t: float = -1.0) -> float:
 	# Nearest hard entry ahead in `dir`. Entries beyond the door, and
 	# unmountable tops (>57px above land_y) that do not reach the
 	# ground line, never generate an entry -- so a landing past the
 	# last spike yields 1e9/-1e9 and the _plan_pick shortcut fires.
 	# The right wall (1232,150) is excluded by the door rule.
+	# Stage 1 (§2.4): `t` is the time the entry is evaluated at
+	# (default _elapsed, preserving all existing callers); a timed
+	# disc's entry uses its centre at t, not its rest centre.
 	var hw: float = _plan_half_w()
 	var ph: float = _plan_height()
+	var tt: float = _elapsed if t < 0.0 else t
 	var best: float = 1e9 if dir > 0.0 else -1e9
 	for shape in lethal:
 		if shape.has("rect"):
@@ -2045,8 +2203,14 @@ func _plan_next_entry(land_x: float, land_y: float, lethal: Array,
 					if e < land_x + 28.0:
 						best = maxf(best, e)
 		else:
-			var c: Vector2 = shape["centre"]
-			var rad: float = shape["radius"]
+			var c: Vector2
+			var rad: float
+			if shape.has("saw"):
+				c = _saw_centre(shape["saw"], tt)
+				rad = float(shape["radius"])
+			else:
+				c = shape["centre"]
+				rad = float(shape["radius"])
 			if c.y + rad > land_y - ph and c.y - rad < land_y:
 				if land_y - (c.y - rad) > 57.0 \
 						and c.y + rad <= land_y - 39.0:
@@ -2106,8 +2270,17 @@ func _plan_engaged(feet: Vector2, lethal: Array, solids: Array,
 					and r.position.y <= feet.y + 200.0:
 				return true
 		else:
-			var c: Vector2 = shape["centre"]
-			var rad: float = shape["radius"]
+			# Stage 1: a timed disc engages at its CURRENT centre
+			# (rest centre would engage/disengage on a disc that
+			# is not there yet, or miss one that is).
+			var c: Vector2
+			var rad: float
+			if shape.has("saw"):
+				c = _saw_centre(shape["saw"], _elapsed)
+				rad = float(shape["radius"])
+			else:
+				c = shape["centre"]
+				rad = float(shape["radius"])
 			if c.x - rad - hw <= a_hi \
 					and c.x + rad + hw >= a_lo \
 					and c.y + rad >= feet.y - 170.0 \
@@ -2159,7 +2332,7 @@ func _plan_required_runup(land_x: float, land_y: float, lethal: Array,
 	# Returns 0 when nothing hard lies ahead, and 1e9 when the
 	# obstacle cannot be cleared from this ground level.
 	var entry: float = _plan_next_entry(land_x, land_y, lethal, solids,
-			dir, door_x)
+			dir, door_x, t_land)
 	if _plan_entry_none(entry, dir):
 		return 0.0
 	var hw: float = _plan_half_w()
@@ -2269,9 +2442,74 @@ func _plan_required_runup(land_x: float, land_y: float, lethal: Array,
 	# disc's far side). Static saws only: a moving saw never
 	# reaches this branch (the planner is disabled inside its
 	# horizon, and _plan_geometry excludes moving saws).
+	# Stage 1 (§2.4): a moving saw DOES reach this branch now.
+	# The timed variant is the DIRECT scan: the runup need is
+	# the distance to the FIRST lattice takeoff (from
+	# _plan_candidates(land_x, land_y, ..., t_land)) whose
+	# simulated flight at its arrival time lands past the
+	# disc's far side at the landing time. That is the design's
+	# concrete §2.4 spec -- and it is also the only variant
+	# that can run here: this branch is called from the plain
+	# planner's inner loop (once per candidate landing via
+	# _plan_followup_ok), and the full rectangle search
+	# (_solve_saw_runin, ~200 ms a call) from here makes a
+	# single _compute_plan take minutes on an unpassable level
+	# (r30-t16: 217+ solver calls from one _compute_plan, the
+	# run never returning). The full solver stays in
+	# _compute_plan's saw branch, where it produces the plan
+	# that is actually executed; a runup DISTANCE only needs
+	# the first crossing takeoff, not the largest-rect centre
+	# (which would also overstate the need and reject feasible
+	# followups). No recursion risk either way: the direct
+	# scan never calls the solver.
 	for shape in lethal:
 		if shape.has("rect"):
 			continue
+		if shape.has("saw"):
+			var saw2: Dictionary = shape["saw"]
+			var rad2: float = float(shape["radius"])
+			var c2: Vector2 = _saw_centre(saw2,
+					t_land if t_land >= 0.0 else _elapsed)
+			var es2: float = c2.x - rad2 - hw if dir > 0.0 \
+					else c2.x + rad2 + hw
+			var at_entry_s2: bool = (es2 > land_x - 28.0 \
+							and es2 <= entry + 12.0) if dir > 0.0 \
+					else (es2 < land_x + 28.0 and es2 >= entry - 12.0)
+			if not at_entry_s2:
+				continue
+			if c2.y + rad2 <= land_y - ph or c2.y - rad2 >= land_y:
+				continue
+			if dir > 0.0 and es2 > door_x - 18.0:
+				continue
+			if dir < 0.0 and es2 < door_x + 18.0:
+				continue
+			var step_s2: float = float(_player_cfg["run_speed"]) * PLAN_DT
+			var cands_s2: Array = _plan_candidates(land_x, land_y,
+					dir * float(_player_cfg["run_speed"]), dir, lethal,
+					solids, timed, t_land)
+			for cand_s2 in cands_s2:
+				var tk2: float = float(cand_s2["x"])
+				var k_s2: int = int(round(absf(tk2 - land_x) / step_s2))
+				var tt_s2: float = t_land
+				if t_land >= 0.0:
+					tt_s2 = t_land + float(k_s2) * PLAN_DT
+				else:
+					tt_s2 = _elapsed + float(k_s2) * PLAN_DT
+				var hz_s2: Dictionary = _plan_dx(float(cand_s2["vx"]),
+						dir, cache)
+				var fl_s2: Dictionary = _plan_flight(tk2, land_y, traj,
+						hz_s2, lethal, solids, tt_s2, timed, flight_solids)
+				if not bool(fl_s2.get("ok", false)):
+					continue
+				var cl2: Vector2 = _saw_centre(saw2, tt_s2
+						+ float(fl_s2.get("land_frame", 0)) * PLAN_DT)
+				var past2: bool = (float(fl_s2["land_x"]) \
+								> cl2.x + rad2 + hw) if dir > 0.0 \
+						else (float(fl_s2["land_x"]) < cl2.x - rad2 - hw)
+				if past2:
+					return absf(tk2 - land_x)
+			_last_blocked_by = "saw_no_crossing_takeoff"
+			return 1e9
 		var c: Vector2 = shape["centre"]
 		var rad: float = shape["radius"]
 		var es: float = c.x - rad - hw if dir > 0.0 \
@@ -2334,6 +2572,11 @@ func _plan_required_runup(land_x: float, land_y: float, lethal: Array,
 					continue
 				h_req = maxf(h_req, land_y - r.position.y)
 		else:
+			# Stage 1: timed discs never reach the rise proxy --
+			# the saw branch above owns them (its runup is the
+			# distance to a crossing takeoff, not a rise need).
+			if shape.has("saw"):
+				continue
 			var c: Vector2 = shape["centre"]
 			var rad: float = shape["radius"]
 			var e2: float = c.x - rad - hw if dir > 0.0 \
@@ -2427,7 +2670,7 @@ func _plan_followup_ok(land_x: float, land_y: float, land_vx: float,
 	# still needs a jump, so require the stance's ground solid to
 	# reach the door.
 	var entry_here: float = _plan_next_entry(land_x, land_y, lethal,
-			solids, dir, door_x)
+			solids, dir, door_x, t_land)
 	if _plan_entry_none(entry_here, dir):
 		var hw0: float = _plan_half_w()
 		for r in solids:
@@ -2439,7 +2682,27 @@ func _plan_followup_ok(land_x: float, land_y: float, land_vx: float,
 						if dir > 0.0 else rr.position.x
 				if (dir > 0.0 and far >= door_x - 18.0) \
 						or (dir < 0.0 and far <= door_x + 18.0):
-					return true
+					# Stage 1 (§2.4): the run to the door must
+					# be clean for SOME departure in the next
+					# period of the timed saw (the disc sweeps
+					# back over the landing zone; the hero may
+					# have to wait out a return sweep). If no
+					# departure in the next period is clean, do
+					# NOT take the shortcut -- the candidate
+					# loop below may still find a jump out.
+					var saw_f: Dictionary = _first_timed_saw(lethal)
+					if saw_f.is_empty():
+						return true
+					var per_f: float = _saw_period(saw_f)
+					if per_f <= 0.0:
+						return true
+					var t_start_f: float = t_land \
+							if t_land >= 0.0 else _elapsed
+					for k in range(int(per_f / PLAN_DT) + 1):
+						if _run_segment_clean(land_x, door_x,
+								land_y, t_start_f + float(k) * PLAN_DT,
+								lethal, solids):
+							return true
 	var cands: Array = _plan_candidates(land_x, land_y, land_vx, dir,
 			lethal, solids, timed, t_land)
 	var step: float = float(_player_cfg["run_speed"]) * PLAN_DT
@@ -2452,13 +2715,23 @@ func _plan_followup_ok(land_x: float, land_y: float, land_vx: float,
 			var k: int = int(round(absf(float(cand["x"]) - land_x)
 					/ step))
 			t_takeoff = t_land + float(k) * PLAN_DT
+		# Stage 1 (§2.4): the run from the landing to this
+		# takeoff must itself be clean of the disc (timed-only
+		# check: static cleanliness of the intermediate stances
+		# is already proven by the _plan_candidates scan above).
+		if not _first_timed_saw(lethal).is_empty():
+			var t_run: float = t_land if t_land >= 0.0 else _elapsed
+			if not _run_segment_clean(land_x, float(cand["x"]),
+					land_y, t_run, lethal, solids, true):
+				continue
 		var horiz: Dictionary = _plan_dx(float(cand["vx"]), dir, cache)
 		var fl: Dictionary = _plan_flight(float(cand["x"]), land_y, traj,
 				horiz, lethal, solids, t_takeoff, timed, flight_solids)
 		if not bool(fl.get("ok", false)):
 			continue
 		var entry: float = _plan_next_entry(float(fl["land_x"]),
-				float(fl["land_y"]), lethal, solids, dir, door_x)
+				float(fl["land_y"]), lethal, solids, dir, door_x,
+				t_takeoff + float(fl.get("land_frame", 0)) * PLAN_DT)
 		if _plan_entry_none(entry, dir):
 			return true
 		var t_land2: float = -1.0
@@ -2507,6 +2780,8 @@ func _plan_pick(feasible: Array, dir: float, traj: Dictionary,
 				"t_dep": float(f.get("t_dep", -1.0)),
 				"timed_kind": str(f.get("timed_kind", "")),
 				"board": bool(f.get("board", false)),
+				"land_x": float(f.get("land_x", -1.0)),
+				"land_y": float(f.get("land_y", -1.0)),
 				"marginal": marg}
 	var past_last: Array = []
 	for f in feasible:
@@ -2577,6 +2852,68 @@ func _plan_pick(feasible: Array, dir: float, traj: Dictionary,
 # to a wait that never resolves (D15S2: the hero boarded fine and
 # then rode forever because the exit search only accepted
 # same-level solids while the destination sits 40 px higher).
+# Stage 2 pillar fix (L165): is a mover boarding at time `s`
+# (boarding at the mover's near end, riding to its far end) clear
+# of every periodic pillar hanging over the ride? Simulates the
+# ride frame by frame: the hero walks toward the exit edge at run
+# speed while the mover carries him, and each periodic pillar is
+# sampled with the same hang/drop/rise arithmetic as
+# _lethal_shapes (a hanging pillar is harmless -- kills() is
+# false while it hangs; a dropping/rising one is lethal). A
+# boarding whose ride clips a pillar corner is rejected, so the
+# planner waits for the next boardable window instead.
+func _mover_board_pillar_safe(level: Dictionary, p: Dictionary,
+		s: float, dir: float) -> bool:
+	var hw: float = _plan_half_w()
+	var ph: float = _plan_height()
+	var feet_y: float = float(p["y"])
+	var period: float = float(p.get("period", 0.0))
+	if period <= 0.0:
+		return true
+	var dep_x: float = float(p["x"]) - hw if dir > 0.0 \
+			else float(p["x"]) + float(p["w"]) + hw
+	var hx: float = dep_x
+	var t_end: float = s + period * 0.5 + 0.3
+	var t: float = s
+	while t <= t_end:
+		var mr: Rect2 = _mover_rect_at(p, t)
+		var target: float = mr.position.x + mr.size.x - hw - 1.0 \
+				if dir > 0.0 else mr.position.x + hw + 1.0
+		var step: float = float(_player_cfg["run_speed"]) * PLAN_DT
+		if target > hx:
+			hx = minf(target, hx + step)
+		elif target < hx:
+			hx = maxf(target, hx - step)
+		var hr := Rect2(hx - hw, feet_y - ph, 2.0 * hw, ph)
+		for h in level.get("hazards", []):
+			if str(h.get("type", "")) != "hanging_pillar":
+				continue
+			if not h.has("period"):
+				continue
+			var per: float = float(h.get("period", 0.0))
+			var dsp: float = float(h.get("drop_speed", 0.0))
+			if per <= 0.0 or dsp <= 0.0:
+				continue
+			var dd: float = maxf(0.0, FLOOR_Y \
+					- (float(h["y"]) + float(h["h"])))
+			var dt: float = dd / dsp
+			var ht: float = maxf(0.0, per - dt - 1.0)
+			var cyc: float = fposmod(t - float(h.get("phase", 0.0)), per)
+			if cyc < ht:
+				continue  # hanging: harmless
+			var dy: float = 0.0
+			if cyc < ht + dt:
+				dy = dsp * (cyc - ht)
+			else:
+				dy = dd * (1.0 - minf(1.0, (cyc - ht - dt) / 1.0))
+			var pr := Rect2(float(h["x"]), float(h["y"]) + dy,
+					float(h["w"]), float(h["h"]))
+			if pr.intersects(hr):
+				return false
+		t += PLAN_DT
+	return true
+
+
 func _timed_departure_for(p: Dictionary, feet: Vector2, dir: float,
 		speed: float, level: Dictionary = {}) -> Dictionary:
 	var r0 := Rect2(float(p["x"]), float(p["y"]), float(p["w"]),
@@ -2614,6 +2951,16 @@ func _timed_departure_for(p: Dictionary, feet: Vector2, dir: float,
 	var theta: float = acos(1.0 - 2.0 * f_hi)
 	var t_a: float = theta * period2 / TAU
 	var earliest: float = _elapsed + travel2
+	# Stage 2 L078 fix (21 Nov): BOTH mover windows are offered
+	# again. The pillar fix's near-end-only rule (f=1 dropped
+	# when |dx| > 8 px) regressed nightmare L078: the f=1
+	# boarding (t_dep 1.88) is the only phase that clears the
+	# timed spike, while the near-end boarding (t_dep 2.21)
+	# puts the hero at the spike as it turns on (died 4/4 at
+	# (604.8, 590.5)). The guard that actually protects L165
+	# is _mover_board_pillar_safe below (it rejects the 4.16
+	# pillar-clipping boarding; L165 still adopts 6.24), not
+	# the near-end rule -- so the rule is removed, not relaxed.
 	for k in range(0, 4):
 		var base: float = float(k) * period2
 		for win in [[base, base + t_a],
@@ -2625,6 +2972,11 @@ func _timed_departure_for(p: Dictionary, feet: Vector2, dir: float,
 			var s: float = maxf(earliest, ws)
 			# Hero needs ~0.15s to step fully onto the mover.
 			if s + 0.15 <= we:
+				# Joint mover+pillar departure: a boarding
+				# whose ride clips a periodic pillar is not a
+				# plan -- wait for the next boardable window.
+				if not _mover_board_pillar_safe(level, p, s, dir):
+					continue
 				# Joint exit: first time after boarding when the
 				# mover's exit edge is within jump range
 				# (PLAN_AIR_DX) of a mountable destination solid
@@ -2748,7 +3100,7 @@ func _plan_flight_useful(land_x: float, land_y: float, feet: Vector2,
 	if absf(land_y - feet.y) > 1.0:
 		return true
 	var entry_after: float = _plan_next_entry(land_x, land_y, lethal,
-			solids, dir, door_x)
+			solids, dir, door_x, t_land)
 	if entry_after != entry0:
 		return true
 	var g0: Rect2 = _plan_ground_at(feet.x, feet.y, solids, timed, t0)
@@ -2980,6 +3332,570 @@ func _ride_jump_off(level: Dictionary, feet: Vector2, dir: float,
 	return true
 
 
+# ---------------------------------------------------------------------------
+# Stage 1 (Path C): timed moving-saw run-in solver (design §2.5).
+# ---------------------------------------------------------------------------
+
+# Hero runs x0 -> x1 at 243 px/s from t_start on ground line y; the
+# rect is tested every frame. Timed circles are sampled at each
+# frame's t; static shapes use the ordinary test. With timed_only,
+# only timed circles are tested: static cleanliness of the
+# intermediate stances is already proven by the _plan_candidates
+# scan that produced the takeoff (it breaks at the first statically
+# bad stance), so re-testing statics here would only duplicate that
+# proof at 60x the cost. Returns false on any hit, or when the run
+# leaves ground (solids given and no ground under the rect).
+func _run_segment_clean(x0: float, x1: float, y: float, t_start: float,
+		lethal: Array, solids: Array = [], timed_only: bool = false) -> bool:
+	var hw: float = _plan_half_w()
+	var ph: float = _plan_height()
+	var speed: float = float(_player_cfg["run_speed"])
+	var dir: float = 1.0 if x1 >= x0 else -1.0
+	var dist: float = absf(x1 - x0)
+	var n: int = int(ceil(dist / (speed * PLAN_DT)))
+	for k in range(n + 1):
+		var x: float = x0 + dir * minf(dist, float(k) * speed * PLAN_DT)
+		var rect := Rect2(x - hw, y - ph, 2.0 * hw, ph)
+		var t: float = t_start + float(k) * PLAN_DT
+		for shape in lethal:
+			if timed_only and not shape.has("saw"):
+				continue
+			if _shape_hits_rect_at(shape, rect, t):
+				return false
+		if not solids.is_empty():
+			var grounded: bool = false
+			for r in solids:
+				var rr: Rect2 = r
+				if absf(rr.position.y - y) <= 3.0 \
+						and x >= rr.position.x - hw \
+						and x <= rr.position.x + rr.size.x + hw:
+					grounded = true
+					break
+			if not grounded:
+				return false
+	return true
+
+
+# Minimum clearance (closest-distance minus r, px) of a jump flight
+# against one moving saw, over frames 0..land_frame. The probe's
+# clearance is the same quantity (simulated, not the set maximum).
+func _saw_flight_clearance(x0: float, y0: float, traj: Dictionary,
+		horiz: Dictionary, saw: Dictionary, t_take: float,
+		land_frame: int) -> float:
+	var hw: float = _plan_half_w()
+	var ph: float = _plan_height()
+	var offs: Array = traj["offs"]
+	var dxs: Array = horiz["dx"]
+	var best: float = 1e9
+	var n: int = mini(land_frame + 1, mini(offs.size(), dxs.size()))
+	for f in range(n):
+		var rect := Rect2(x0 + float(dxs[f]) - hw,
+				y0 + float(offs[f]) - ph, 2.0 * hw, ph)
+		var c: Vector2 = _saw_centre(saw, t_take + float(f) * PLAN_DT)
+		var closest := Vector2(clampf(c.x, rect.position.x,
+				rect.position.x + rect.size.x),
+				clampf(c.y, rect.position.y,
+				rect.position.y + rect.size.y))
+		best = minf(best, closest.distance_to(c) - float(saw["r"]))
+	return best
+
+
+# Stage 1: is a landing stance safe from one moving saw for a whole
+# period? Samples the disc at PLAN_DT from t_start; any hit means
+# the hero cannot stand (or wait) there. Used by the walk-out filter
+# and by the blind-wait guard in _decide (a hero must never WAIT on
+# a stance the disc sweeps through: the wait traps him until the
+# disc returns into him -- spike-d09 strategy 0 died exactly so,
+# waiting at 665.4 while the disc swept back to 695).
+func _saw_stance_safe_period(rect: Rect2, saw: Dictionary,
+		period: float, t_start: float) -> bool:
+	var shape: Dictionary = {"saw": saw, "radius": float(saw["r"])}
+	var n: int = int(ceil(period / PLAN_DT))
+	for k in range(n + 1):
+		if _shape_hits_rect_at(shape, rect,
+				t_start + float(k) * PLAN_DT):
+			return false
+	return true
+
+
+# Stage 1: swept x-range [lo, hi] of a moving saw (path: segment
+# bbox; swing: 13-sample arc), radius included.
+func _saw_swept_x(saw: Dictionary) -> Array:
+	var sr: float = float(saw["r"])
+	if saw.has("path"):
+		var pth: Dictionary = saw["path"]
+		return [minf(float(saw["x"]), float(pth["x2"])) - sr,
+				maxf(float(saw["x"]), float(pth["x2"])) + sr]
+	var s0: Dictionary = saw["swing"]
+	var piv := Vector2(float(s0["pivot_x"]), float(s0["pivot_y"]))
+	var off: Vector2 = Vector2(float(saw["x"]),
+			float(saw["y"])) - piv
+	var half_arc: float = deg_to_rad(float(s0["arc_deg"])) * 0.5
+	var lo: float = 1e9
+	var hi: float = -1e9
+	for k in range(13):
+		var ang: float = -half_arc + 2.0 * half_arc * float(k) / 12.0
+		var cc: Vector2 = piv + off.rotated(ang)
+		lo = minf(lo, cc.x - sr)
+		hi = maxf(hi, cc.x + sr)
+	return [lo, hi]
+
+
+# Stage 1: walk-out filter -- the cheap, provable stand-in for the
+# probe's full walk-out simulation. After landing at land_x at
+# t_land, the hero runs right (or left) at 243 px/s while the disc
+# moves at most ~84 px/s, so the disc can never catch him from
+# behind and can never reach him once he is past the sweep. The
+# landing is walk-out-safe iff (a) the landing rect lies fully past
+# the swept far edge, or (b) the disc is fully behind the hero at
+# landing time (disc centre + r + hw < land_x), or (c) the landing
+# stance is safe for a whole period. Validated against the probe:
+# on spike-d09-patrol the (run + flight + filter) set is EXACTLY
+# the probe's 465 lattice combos, and its largest floor rectangle
+# is [661.3, 669.4] x [1.5, 1.7333] -- while the filter-less set's
+# largest rectangle is the trap region (560.05-580.3) x
+# (0.6667-1.5667), the region the first solver build picked and
+# died in (landing 665, disc returning to 720).
+func _saw_walkout_ok(land_x: float, land_y: float, saw: Dictionary,
+		period: float, t_land: float, dir: float) -> bool:
+	var hw: float = _plan_half_w()
+	var ph: float = _plan_height()
+	var sw: Array = _saw_swept_x(saw)
+	var far: float = float(sw[1]) if dir > 0.0 else float(sw[0])
+	if dir > 0.0 and land_x - hw >= far - 1e-9:
+		return true
+	if dir < 0.0 and land_x + hw <= far + 1e-9:
+		return true
+	var c: Vector2 = _saw_centre(saw, t_land)
+	if dir > 0.0 and c.x + float(saw["r"]) + hw < land_x:
+		return true
+	if dir < 0.0 and c.x - float(saw["r"]) - hw > land_x:
+		return true
+	var rect := Rect2(land_x - hw, land_y - ph, 2.0 * hw, ph)
+	return _saw_stance_safe_period(rect, saw, period, t_land)
+
+
+# Stage 1 (§2.5): cheap feasibility of one (takeoff, phase) combo:
+# run-segment from dep_x at t_dep, one timed flight at t_take, and
+# the walk-out filter on the landing. No followup check (that is
+# the refine pass's job). t_shift shifts the DISC sampling time
+# (flight, clearance, walkout) by one frame when the caller wants
+# the probe's (checker) model; 0.0 is the game model. Returns
+# {"ok": ...} with the flight.
+func _saw_combo_feasible(tk: float, phi: float, dep_x: float,
+		feet: Vector2, dir: float, saw: Dictionary, period: float,
+		lethal: Array, solids: Array, timed: Array,
+		flight_solids: Array, traj: Dictionary,
+		cache: Dictionary, t_shift: float = 0.0) -> Dictionary:
+	var speed: float = float(_player_cfg["run_speed"])
+	var travel: float = absf(tk - dep_x) / speed
+	var base: float = _elapsed + travel
+	var delta: float = fposmod(phi - fposmod(base, period), period)
+	var t_take: float = base + delta
+	var t_dep: float = _elapsed + delta
+	if not _run_segment_clean(dep_x, tk, feet.y, t_dep, lethal,
+			solids, true):
+		return {"ok": false}
+	var horiz: Dictionary = _plan_dx(dir * speed, dir, cache)
+	var fl: Dictionary = _plan_flight(tk, feet.y, traj, horiz, lethal,
+			solids, t_take + t_shift, timed, flight_solids)
+	if not bool(fl.get("ok", false)):
+		return {"ok": false}
+	var clear: float = _saw_flight_clearance(tk, feet.y, traj, horiz,
+			saw, t_take + t_shift, int(fl.get("land_frame", 0)))
+	var t_land: float = t_take + t_shift \
+			+ float(fl.get("land_frame", 0)) * PLAN_DT
+	if not _saw_walkout_ok(float(fl["land_x"]), float(fl["land_y"]),
+			saw, period, t_land, dir):
+		return {"ok": false}
+	return {"ok": true, "takeoff": tk, "t_dep": t_dep,
+			"t_take": t_take, "land_x": float(fl["land_x"]),
+			"land_y": float(fl["land_y"]),
+			"land_vx": float(fl["land_vx"]), "clearance": clear,
+			"t_land": t_land}
+
+
+func _saw_solve_done(res: Dictionary) -> Dictionary:
+	_saw_solve_depth = maxi(0, _saw_solve_depth - 1)
+	return res
+
+
+# Stage 1 (§2.5, C1 fix): search (takeoff, t_dep) for a timed run-in
+# over one moving saw. The hero departs the CURRENT stance (dep_x)
+# at t_dep so arrival at the takeoff matches the saw phase; the hero
+# never waits at the takeoff and never jumps late.
+#
+# Pick rule (the design's floor-rectangle rule, not a max-slack
+# heuristic): scan (takeoff, takeoff-phase) exactly as the probe
+# does -- with the probe's model (checker traj: offs and falling
+# shifted down one frame; disc sampled one frame later via
+# t_shift), so the rectangle found is the design's rectangle,
+# not the larger game-true one; a combo is feasible iff
+# run-segment + timed
+# flight + the walk-out filter all pass; find the LARGEST-AREA
+# axis-aligned rectangle with takeoff width >= 8.1 px (two
+# lattice frames), phase width >= 0.10 s (six frames) -- area
+# (Wx + 4.05) x (Wt + 1/60), the probe's definition -- and execute
+# its CENTRE (phase edges refined to 1/60 s first). The centre
+# combo must clear by >= 4.05 px (F3) and pass the full followup
+# check at PLAN_DT refinement (game trajectory); if it fails, the
+# next-largest rectangle is tried (up to 5). The refinement
+# targets the EXECUTED combo: the harness fires the jump one
+# frame (4.05 px) early, so the plan's takeoff is the S5 target
+# (executed + 4.05) and its t_dep one frame earlier. NEVER the
+# largest-rectangle centre of the unfiltered set: for d09-lattice
+# that is the trap region, and the max-slack (Chebyshev) pick on
+# the unfiltered set lands in it too (centre 570.18 / 1.1167,
+# landing 665 inside the sweep, disc returning to 720 -- the
+# first build's death). The floor-rect centre for d09-lattice is
+# (665.35, 1.6167, clear 6.88).
+func _solve_saw_runin(feet: Vector2, dir: float, saw: Dictionary,
+		period: float, lethal: Array, solids: Array, timed: Array,
+		flight_solids: Array, traj: Dictionary, cache: Dictionary,
+		door_x: float) -> Dictionary:
+	_saw_solve_depth += 1
+	var speed: float = float(_player_cfg["run_speed"])
+	var hw: float = _plan_half_w()
+	var ph: float = _plan_height()
+	if period <= 0.0:
+		return _saw_solve_done({"ok": false})
+	# Departure point: the current stance, iff safe for a whole
+	# period (the hero waits there; it must clear the disc at
+	# every phase). No backwards walking to find safe ground in
+	# Stage 1 -- the level must supply safe approach ground.
+	var dep_x: float = feet.x
+	var dep_rect := Rect2(dep_x - hw, feet.y - ph, 2.0 * hw, ph)
+	if not _saw_stance_safe_period(dep_rect, saw, period, _elapsed):
+		return _saw_solve_done({"ok": false})
+	# Checker model for the rectangle search: the probe (and the
+	# design's §5.2 rectangle) samples the disc one frame later
+	# than _plan_flight does at the same hero position --
+	# _plan_flight's frame f is the probe's position k = f+1
+	# (dxs[f] = (f+1) * 4.05, y = offs[f] = the probe's offs[k-1])
+	# but sampled at t_take + f * DT, while the probe is at that
+	# position at t_take + (f+1) * DT. The disc moves ~1.4 px /
+	# frame, so the planner is ~1.4 px too permissive in the
+	# flight check (d09 (661.30, 1.8833) clips the disc by 0.56 px
+	# in the probe model and clears in the planner's). Passing
+	# t_shift = PLAN_DT to _saw_combo_feasible samples the disc
+	# at the probe's times (and lands the walkout filter at the
+	# probe's t_land). The trajectory itself is NOT shifted:
+	# _plan_trajectory's offs already are the checker's offs
+	# (both start at -9.5); shifting them moves the hero a frame
+	# high and inflates the rectangle. The refine pass below
+	# verifies the executed combo with the GAME model
+	# (t_shift = 0).
+	# Swept zone (same construction as _plan_geometry's trigger).
+	# Takeoffs are searched only inside swept zone +- 60 px
+	# (the probe's scan range; C3 speed fallback, applied first).
+	var sw: Array = _saw_swept_x(saw)
+	var sw_lo: float = float(sw[0])
+	var sw_hi: float = float(sw[1])
+	var cands: Array = _plan_candidates(feet.x, feet.y, dir * speed,
+			dir, lethal, solids, timed, _elapsed, true)
+	var tks: Array = []
+	for cand in cands:
+		var tk: float = float(cand["x"])
+		if tk >= sw_lo - 60.0 and tk <= sw_hi + 60.0:
+			tks.append(tk)
+	# F2 (Stage 2): sort takeoffs ascending. _plan_candidates
+	# returns them in TRAVEL order, which is descending leftward
+	# (dir=-1, nightmare mirror); the rectangle search below
+	# assumes ascending tks (width test tks[i2]-tks[i1] >= 8.1,
+	# area, tk_lo < tk_hi for refine). Rightward tks are already
+	# ascending, so this is a no-op there.
+	tks.sort()
+	if tks.is_empty():
+		return _saw_solve_done({"ok": false})
+	# The rectangle search uses the CHECKER's y0 (the floor top),
+	# not the hero's real feet.y. The design's §5.2 rectangle is
+	# defined by the probe, which stands the hero at y0 =
+	# floor_top exactly; the game really stands him 0.07 px
+	# above the floor (Godot move_and_slide contact margin, see
+	# the PLAN_AIR_DX note), and that 0.07 px flips two
+	# knife-edge corners -- (632.95, 1.90) and (645.10, 2.0833)
+	# are lethal by ~0.07 px in the probe and clear by ~0.04 px
+	# in the game -- which makes [632.95, 645.10] x [1.90, 2.0833]
+	# (area 3.24) a rectangle in the game model but not in the
+	# probe, so the largest-rect rule picks it over the probe's
+	# [661.30, 669.40] x [1.50, 1.7333] (area 3.04). Using the
+	# floor top for the rectangle search restores the probe's
+	# set (the game is 0.06 px MORE permissive, so a rect that
+	# is a rectangle here is also one in the game). The refine
+	# pass below keeps the REAL feet.y: the executed combo is
+	# verified in the game model, where the hero really stands.
+	var floor_top: float = feet.y
+	var best_gap: float = 1.0
+	for s in solids:
+		var sr: Rect2 = s
+		if dep_x >= sr.position.x - 0.01 \
+				and dep_x <= sr.position.x + sr.size.x + 0.01:
+			var gap: float = absf(sr.position.y - feet.y)
+			if gap < best_gap:
+				best_gap = gap
+				floor_top = sr.position.y
+	var feet_chk := Vector2(feet.x, floor_top)
+	# Coarse pass: (takeoff, phase), phase step 0.05 s over one
+	# period; feasibility = run + flight + walk-out filter.
+	var coarse_step: float = 0.05
+	var ph_vals: Array = []
+	var pv: float = 0.0
+	while pv < period - 1e-9:
+		ph_vals.append(pv)
+		pv += coarse_step
+	var n_tk: int = tks.size()
+	var n_ph: int = ph_vals.size()
+	var feas: Array = []
+	for i in range(n_tk):
+		var row: Array = []
+		for j in range(n_ph):
+			var cb: Dictionary = _saw_combo_feasible(
+					float(tks[i]), float(ph_vals[j]), dep_x, feet_chk,
+					dir, saw, period, lethal, solids, timed,
+					flight_solids, traj, cache, PLAN_DT)
+			row.append(bool(cb.get("ok", false)))
+		feas.append(row)
+	# Column prefix sums: pref[j][i] = feasible count in tk rows
+	# 0..i at phase j, so a rectangle's column test is O(1).
+	var pref: Array = []
+	for j in range(n_ph):
+		var col: Array = []
+		var run: int = 0
+		for i in range(n_tk):
+			if bool(feas[i][j]):
+				run += 1
+			col.append(run)
+		pref.append(col)
+	# Largest-area rectangles meeting the floor widths.
+	var rects: Array = []
+	for i1 in range(n_tk):
+		for i2 in range(i1, n_tk):
+			if float(tks[i2]) - float(tks[i1]) < 8.1 - 0.001:
+				continue
+			var run_start: int = -1
+			for j in range(n_ph + 1):
+				var all_ok: bool = false
+				if j < n_ph:
+					var cnt: int = int(pref[j][i2]) \
+							- (int(pref[j][i1 - 1]) if i1 > 0 else 0)
+					all_ok = cnt == i2 - i1 + 1
+				if all_ok:
+					if run_start < 0:
+						run_start = j
+				else:
+					if run_start >= 0:
+						var j1: int = run_start
+						var j2: int = j - 1
+						if float(ph_vals[j2]) - float(ph_vals[j1]) \
+								>= 0.10 - 0.001:
+							var area: float = (float(tks[i2]) \
+									- float(tks[i1]) + 4.05) \
+									* (float(ph_vals[j2]) \
+									- float(ph_vals[j1]) + PLAN_DT)
+							rects.append({"area": area,
+									"i1": i1, "i2": i2,
+									"j1": j1, "j2": j2})
+						run_start = -1
+	if rects.is_empty():
+		return _saw_solve_done({"ok": false})
+	rects.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return float(a["area"]) > float(b["area"]))
+	# Rank by REFINED area, not coarse area. The coarse grid's
+	# 0.05 s phase step quantises a rectangle's height, so a
+	# coarse-larger rect can be refined-smaller: d09's
+	# [641.05, 653.20] rect scores 2.70 coarse but 2.97 refined,
+	# while the probe's [661.30, 669.40] rect scores 2.63 coarse
+	# but 3.04 refined -- ranking by coarse area executes the
+	# wrong centre. So refine the top 10 coarse rects' phase
+	# edges to 1/60 s (verified at EVERY tk row -- the feasible
+	# phi range shifts with tk, so testing only the centre row
+	# would claim a rectangle that is not one; the first build's
+	# rect [645.10, 657.25] x [1.6333, 1.95] was inflated exactly
+	# so), then rank by the refined area.
+	var refined_rects: Array = []
+	for rect in rects.slice(0, 10):
+		var i1: int = int(rect["i1"])
+		var i2: int = int(rect["i2"])
+		var j1: int = int(rect["j1"])
+		var j2: int = int(rect["j2"])
+		var tk_lo: float = float(tks[i1])
+		var tk_hi: float = float(tks[i2])
+		var phi_lo: float = float(ph_vals[j1])
+		var phi_hi: float = float(ph_vals[j2])
+		# Bound the walks against the ORIGINAL coarse edges: the
+		# bound must not move with phi_hi/phi_lo (the walk assigns
+		# phi_hi = probe_phi inside the loop, so `probe_phi <=
+		# phi_hi + coarse_step` never terminates while combos stay
+		# feasible -- vpatrol3 ran the hi walk to phi 111.28 s).
+		# At most one coarse step (0.05 s, ~3 frames) past each
+		# edge, which is all the 1/60 s refinement needs.
+		var phi_hi_orig: float = phi_hi
+		var probe_phi: float = phi_hi + PLAN_DT
+		while probe_phi <= phi_hi_orig + coarse_step + 1e-9:
+			var all_ok_hi: bool = true
+			for i in range(i1, i2 + 1):
+				var cb_hi: Dictionary = _saw_combo_feasible(
+						float(tks[i]), probe_phi, dep_x, feet_chk,
+						dir, saw, period, lethal, solids, timed,
+						flight_solids, traj, cache, PLAN_DT)
+				if not bool(cb_hi.get("ok", false)):
+					all_ok_hi = false
+					break
+			if not all_ok_hi:
+				break
+			phi_hi = probe_phi
+			probe_phi += PLAN_DT
+		var phi_lo_orig: float = phi_lo
+		probe_phi = phi_lo - PLAN_DT
+		while probe_phi >= phi_lo_orig - coarse_step - 1e-9:
+			var all_ok_lo: bool = true
+			for i in range(i1, i2 + 1):
+				var cb_lo: Dictionary = _saw_combo_feasible(
+						float(tks[i]), probe_phi, dep_x, feet_chk,
+						dir, saw, period, lethal, solids, timed,
+						flight_solids, traj, cache, PLAN_DT)
+				if not bool(cb_lo.get("ok", false)):
+					all_ok_lo = false
+					break
+			if not all_ok_lo:
+				break
+			phi_lo = probe_phi
+			probe_phi -= PLAN_DT
+		var area_r: float = (tk_hi - tk_lo + 4.05) * (phi_hi - phi_lo + PLAN_DT)
+		refined_rects.append({"area": area_r, "i1": i1, "i2": i2,
+				"phi_lo": phi_lo, "phi_hi": phi_hi})
+	refined_rects.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return float(a["area"]) > float(b["area"]))
+	# Try the largest refined rectangles first (up to 5): take
+	# the centre, and verify it at PLAN_DT with the full
+	# followup check and F3 (centre clearance >= 4.05 px).
+	# The first centre that passes is executed.
+	var tried: int = 0
+	for rect in refined_rects:
+		if tried >= 5:
+			break
+		tried += 1
+		var i1: int = int(rect["i1"])
+		var i2: int = int(rect["i2"])
+		var tk_lo: float = float(tks[i1])
+		var tk_hi: float = float(tks[i2])
+		var tk_c: float = 0.5 * (tk_lo + tk_hi)
+		var phi_lo: float = float(rect["phi_lo"])
+		var phi_hi: float = float(rect["phi_hi"])
+		var phi_c: float = 0.5 * (phi_lo + phi_hi)
+		# PLAN_DT refinement around the centre, targeting the
+		# EXECUTED combo. The harness fires the jump one frame
+		# (4.05 px) early: at _elapsed == t_take the feet are
+		# exactly one frame short of the planned takeoff (d08:
+		# planned 592.45 fired 588.40; d09: planned 661.30 fired
+		# 657.25 -- the S5 branch fires at the first frame where
+		# both windows hold, and the position lags the clock by
+		# one frame because _decide runs before the frame's
+		# movement update). So the plan's takeoff is the S5
+		# TARGET (executed + 4.05) and its t_dep is one frame
+		# earlier than the executed combo's departure; the combo
+		# verified here (run + flight + walkout + useful +
+		# followup, game trajectory, F3) is the EXECUTED one
+		# (tk_exec, t_take). The planned combo (tk_exec + 4.05)
+		# is a rectangle member by construction (the rectangle
+		# is >= 8.1 px wide, so centre + 4.05 <= tk_hi).
+		var tk_opts: Array = []
+		for i in range(i1, i2 + 1):
+			tk_opts.append(float(tks[i]))
+		tk_opts.sort_custom(func(a: float, b: float) -> bool:
+			return absf(a - tk_c) < absf(b - tk_c))
+		var refined: Array = []
+		for tk_exec in tk_opts.slice(0, 2):
+			var tk_plan: float = float(tk_exec) + 4.05
+			var travel_e: float = absf(float(tk_exec) - dep_x) / speed
+			var base_e: float = _elapsed + travel_e
+			var delta_c: float = fposmod(phi_c \
+					- fposmod(base_e, period), period)
+			var t_dep_c: float = _elapsed + delta_c
+			for m in range(-3, 4):
+				var t_dep2: float = t_dep_c + float(m) * PLAN_DT
+				if t_dep2 < _elapsed:
+					continue
+				var t_take2: float = t_dep2 + travel_e
+				var cb2: Dictionary = _saw_combo_feasible(
+						float(tk_exec), fposmod(t_take2, period),
+						dep_x, feet, dir, saw, period, lethal,
+						solids, timed, flight_solids, traj, cache)
+				if not bool(cb2.get("ok", false)):
+					continue
+				var clear2: float = float(cb2["clearance"])
+				if clear2 < PLAN_KNIFE_EDGE:
+					continue
+				# True run: the hero actually departs one frame
+				# earlier than the combo's t_dep (the S5 target
+				# is one frame ahead of the executed takeoff),
+				# so re-check the run at the actual departure
+				# time; the combo's own run check is one frame
+				# late in the departure and models the hero
+				# 4.05 px behind his true position.
+				var t_dep_act: float = t_dep2 - PLAN_DT
+				if t_dep_act < _elapsed:
+					continue
+				if not _run_segment_clean(dep_x, float(tk_exec),
+						feet.y, t_dep_act, lethal, solids, true):
+					continue
+				var entry0b: float = _plan_next_entry(feet.x,
+						feet.y, lethal, solids, dir, door_x,
+						_elapsed)
+				if not _plan_flight_useful(float(cb2["land_x"]),
+						float(cb2["land_y"]), feet, entry0b,
+						lethal, solids, timed, dir, door_x,
+						t_take2, float(cb2["t_land"])):
+					continue
+				if not _plan_followup_ok(float(cb2["land_x"]),
+						float(cb2["land_y"]), float(cb2["land_vx"]),
+						dir, traj, cache, lethal, solids, door_x,
+						float(cb2["t_land"]), timed, flight_solids):
+					continue
+				var phase2: float = fposmod(t_take2, period)
+				var dist2: float = absf(float(tk_exec) - tk_c) \
+						+ speed * absf(phase2 - phi_c)
+				refined.append({"takeoff": tk_plan,
+						"exec_takeoff": float(tk_exec),
+						"t_dep": t_dep_act, "t_take": t_take2,
+						"clearance": clear2, "dist": dist2})
+		if refined.is_empty():
+			continue
+		refined.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			if absf(float(a["dist"]) - float(b["dist"])) > 0.01:
+				return float(a["dist"]) < float(b["dist"])
+			return float(a["clearance"]) > float(b["clearance"]))
+		var pick: Dictionary = refined[0]
+		var phase_p: float = fposmod(float(pick["t_take"]), period)
+		# Marginal is judged on the EXECUTED point (the combo
+		# that actually fires), not the S5 target. The 0.001 /
+		# 0.0001 guards are float-error guards only: tk values
+		# are lattice multiples of 4.05 and phases multiples of
+		# 1/60, so a true distance is 0 or >= one step; the
+		# guards keep a 4.05 (one full step) from reading as
+		# marginal through float error.
+		var marg: bool = absf(float(pick["exec_takeoff"]) - tk_lo) \
+						< PLAN_KNIFE_EDGE - 0.001 \
+				or absf(tk_hi - float(pick["exec_takeoff"])) \
+						< PLAN_KNIFE_EDGE - 0.001 \
+				or absf(phase_p - phi_lo) < PLAN_DT - 0.0001 \
+				or absf(phi_hi - phase_p) < PLAN_DT - 0.0001
+		print("SAW_RUNIN_PICK takeoff=%.2f exec=%.2f t_dep=%.4f t_take=%.4f "
+				% [float(pick["takeoff"]), float(pick["exec_takeoff"]),
+				float(pick["t_dep"]), float(pick["t_take"])]
+				+ "phase=%.4f clearance=%.2f rect=[%.2f,%.2f]x[%.4f,%.4f] marginal=%s"
+				% [phase_p, float(pick["clearance"]), tk_lo, tk_hi,
+				phi_lo, phi_hi, str(marg)])
+		return _saw_solve_done({"ok": true,
+				"takeoff": float(pick["takeoff"]),
+				"t_dep": float(pick["t_dep"]),
+				"takeoff_time": float(pick["t_take"]),
+				"timed_kind": "saw_runin", "board": false,
+				"brake_x": -1.0, "dep_x": dep_x, "saw": saw,
+				"marginal": marg, "clearance": float(pick["clearance"])})
+	return _saw_solve_done({"ok": false})
+
+
 func _compute_plan(level: Dictionary, feet: Vector2,
 		dir: float) -> Dictionary:
 	var geo: Dictionary = _plan_geometry(level, feet, dir)
@@ -2989,7 +3905,65 @@ func _compute_plan(level: Dictionary, feet: Vector2,
 	var solids: Array = geo["solids"]
 	var timed: Array = geo["timed"]
 	var flight_solids: Array = geo["flight_solids"]
+	# Stage 2 pillar fix: the landed trigger pillar stays a pure
+	# lethal rect in the planner (hazard_node.gd: its solid is
+	# disabled once dropped, overlap = lethal) -- flights must
+	# clear it and land on the floor past it. No pillar-top
+	# landing exists in the real game; see the P5 scope fix in
+	# _plan_geometry, which is what lets the planner engage here.
 	var door_x: float = float(level["door"]["x"])
+	# Stage 1 (§2.5): a timed-saw run-in is the immediate action
+	# only when the saw is the nearest hard entry. The solver runs
+	# BEFORE the timed departure plan (mover/dashed); if a plain
+	# obstacle lies between the hero and the timed takeoff, fall
+	# through to plain planning and re-solve after it lands. Failed
+	# solves are throttled to one per 24 px of approach (the plain
+	# planner re-checks every 4.05 px when engaged).
+	var timed_saws: Array = geo.get("timed_saws", [])
+	if not timed_saws.is_empty():
+		var saw_best: Dictionary = {}
+		var saw_best_d: float = 1e9
+		for s in timed_saws:
+			var sd: float = (float(s["x"]) - feet.x) * dir
+			if sd >= -20.0 and sd < saw_best_d:
+				saw_best_d = sd
+				saw_best = s
+		if not saw_best.is_empty():
+			var per_s: float = _saw_period(saw_best)
+			var key_s: String = str(float(saw_best["x"])) + "/" \
+					+ str(float(saw_best["y"])) + "/" + str(per_s)
+			var throttled: bool = key_s == _saw_last_solve_key \
+					and absf(feet.x - _saw_last_solve_x) < 24.0
+			if not throttled and per_s > 0.0:
+				_saw_last_solve_key = key_s
+				_saw_last_solve_x = feet.x
+				var traj_s: Dictionary = _plan_trajectory()
+				var cache_s: Dictionary = {}
+				var ms0: int = Time.get_ticks_msec()
+				var sol: Dictionary = _solve_saw_runin(feet, dir,
+						saw_best, per_s, lethal, solids, timed,
+						flight_solids, traj_s, cache_s, door_x)
+				print("SAW_RUNIN_SOLVE ms=%d ok=%s feet=%.2f" % [
+						Time.get_ticks_msec() - ms0,
+						str(bool(sol.get("ok", false))), feet.x])
+				if bool(sol.get("ok", false)):
+					# S1 defence in depth: never adopt a plan
+					# whose departure is already past.
+					if float(sol.get("t_dep", -1.0)) >= _elapsed:
+						var lethal_plain: Array = []
+						for sh in lethal:
+							if not sh.has("saw"):
+								lethal_plain.append(sh)
+						var entry_plain: float = _plan_next_entry(
+								feet.x, feet.y, lethal_plain, solids,
+								dir, door_x)
+						var shadowed_s: bool = (dir > 0.0 \
+										and entry_plain \
+										< float(sol["takeoff"])) \
+								or (dir < 0.0 and entry_plain \
+										> float(sol["takeoff"]))
+						if not shadowed_s:
+							return sol
 	# Nearest plain entry ahead (lethal / wall / step face). Gaps
 	# produce no entry here, so this is the obstacle a timed plan
 	# must not shadow.
@@ -3037,7 +4011,8 @@ func _compute_plan(level: Dictionary, feet: Vector2,
 			fail_frames[ci] = int(fl.get("fail_frame", 0))
 			continue
 		var entry: float = _plan_next_entry(float(fl["land_x"]),
-				float(fl["land_y"]), lethal, solids, dir, door_x)
+				float(fl["land_y"]), lethal, solids, dir, door_x,
+				t0 + float(fl.get("land_frame", 0)) * PLAN_DT)
 		if not _plan_flight_useful(float(fl["land_x"]),
 				float(fl["land_y"]), feet, entry0, lethal, solids,
 				timed, dir, door_x, t0,
@@ -3073,7 +4048,8 @@ func _compute_plan(level: Dictionary, feet: Vector2,
 			if not bool(fl2.get("ok", false)):
 				continue
 			var entry2: float = _plan_next_entry(float(fl2["land_x"]),
-					float(fl2["land_y"]), lethal, solids, dir, door_x)
+					float(fl2["land_y"]), lethal, solids, dir, door_x,
+					t0 + float(fl2.get("land_frame", 0)) * PLAN_DT)
 			if not _plan_flight_useful(float(fl2["land_x"]),
 					float(fl2["land_y"]), feet, entry0, lethal, solids,
 					timed, dir, door_x, t0,
@@ -3120,14 +4096,22 @@ func _decide(level: Dictionary) -> Dictionary:
 	var on_floor: bool = _on_floor()
 	# A plan is tied to one ground approach: any air/ground transition
 	# invalidates it so the next approach is re-planned from real state.
-	# Landing also ends any in-flight braking.
+	# Landing also ends any in-flight braking. Stage 1 (S4): the
+	# transition clear also resets the timed-plan state, so a stale
+	# saw_runin departure cannot survive a jump or a landing.
 	if _plan_prev_on_floor and not on_floor:
 		_plan_active = false
+		if _plan_timed_kind == "saw_runin":
+			_plan_t_dep = -1.0
+			_plan_timed_kind = ""
 	elif not _plan_prev_on_floor and on_floor:
 		_plan_active = false
 		_plan_next_check_x = -1e9
 		_flight_active = false
 		_flight_brake_x = -1.0
+		if _plan_timed_kind == "saw_runin":
+			_plan_t_dep = -1.0
+			_plan_timed_kind = ""
 	_plan_prev_on_floor = on_floor
 	# Timed-platform wait state at entry (waiting for a departure, or
 	# riding a mover) must not count as blocked: velocity is ~0 in
@@ -3178,9 +4162,20 @@ func _decide(level: Dictionary) -> Dictionary:
 			deadline = exit_deadline if deadline < 0.0 \
 					else minf(deadline, exit_deadline)
 		if deadline > 0.0 and _elapsed >= deadline:
-			_ride_since = -1.0
+			var walk_to2: float = float(ride.get("walk_to", feet.x))
+			var at_edge: bool = (dir > 0.0 \
+						and feet.x >= walk_to2 - 20.0) \
+					or (dir < 0.0 and feet.x <= walk_to2 + 20.0)
+			if at_edge:
+				_ride_since = -1.0
+				_plan_t_exit = -1.0
+				return {"dir": dir, "jump": true, "waiting": false}
+			# Stage 2 pillar fix (L165): not at the edge yet --
+			# a forced jump here lands in the gap (died at
+			# 702.1, y770). Re-arm the net and keep walking to
+			# the edge; step_off / _ride_jump_off own the exit.
+			_ride_best_t = _elapsed
 			_plan_t_exit = -1.0
-			return {"dir": dir, "jump": true, "waiting": false}
 		var walk_to: float = float(ride.get("walk_to", feet.x))
 		var wdir: float = 0.0
 		if walk_to - feet.x > 2.0:
@@ -3195,6 +4190,7 @@ func _decide(level: Dictionary) -> Dictionary:
 			feet.y - 48.0, LOOKAHEAD, 52.0)
 	var hazard_ahead: bool = false
 	var timed_ahead: bool = false
+	var timed_saw_ahead: bool = false
 	for shape in _lethal_shapes(level):
 		if _shape_hits_rect(shape, probe):
 			hazard_ahead = true
@@ -3206,6 +4202,16 @@ func _decide(level: Dictionary) -> Dictionary:
 			if bool(shape.get("timed", false)) \
 					and not bool(shape.get("landed", false)):
 				timed_ahead = true
+				# Stage 1 (§3): _lethal_shapes saw entries carry
+				# {"centre", "timed"} (autopilot.gd L385-387),
+				# so timed AND centre detects exactly moving
+				# saws (static saws carry timed=false; spikes
+				# and columns carry "rect", not "centre"). The
+				# planner's lethal array (entries with a "saw"
+				# key) is a DIFFERENT collection -- do not "fix"
+				# this detection to look for a "saw" key here.
+				if shape.has("centre"):
+					timed_saw_ahead = true
 	# Ground / gap / mount sensing from current platform rects.
 	var rects: Array = _current_platform_rects(level)
 	var ground_ahead: bool = false
@@ -3239,22 +4245,64 @@ func _decide(level: Dictionary) -> Dictionary:
 		_blocked_frames = 0
 	var blocked: bool = _blocked_frames > BLOCKED_FRAMES_JUMP
 	# Timed hazard blocking safe ground: WAIT, then force a jump.
+	# Stage 1 (§3): the branch must NOT nuke a saw_runin plan
+	# while the hero legitimately waits for t_dep at safe ground
+	# (timed_ahead is true whenever the disc swings into the probe
+	# rect, i.e. every period), and the 3.0 s force-jump is DELETED
+	# for moving saws -- it is a blind jump at an arbitrary phase.
+	# The force-jump survives ONLY for non-saw timed shapes. While
+	# a saw_runin plan waits, the guard below makes this `if` false
+	# so the `else` resets _block_wait to 0.0.
 	var safe_here: bool = true
 	var prect: Rect2 = _player_rect()
 	for shape in _lethal_shapes(level):
 		if _shape_hits_rect(shape, prect):
 			safe_here = false
 			break
-	if timed_ahead and on_floor and safe_here and dir != 0.0:
+	# Stage 1 (C6 fix B): never WAIT on a stance a moving saw
+	# sweeps through within one period -- waiting there traps the
+	# hero until the disc returns into him (spike-d09 strategy 0
+	# died waiting at 665.4 while the disc swept back to 695).
+	# A stance safe only at this instant is not a waiting stance.
+	# When unsafe, fall through so the planner / greedy can run
+	# or jump out instead. (The saw_runin wait below is exempt:
+	# its departure point was verified safe for a whole period
+	# at formation.)
+	var stance_unsafe: bool = false
+	if timed_saw_ahead:
+		for h in level["hazards"]:
+			if String(h["type"]) != "saw":
+				continue
+			if not h.has("path") and not h.has("swing"):
+				continue
+			var per: float = _saw_period(h)
+			if per > 0.0 and not _saw_stance_safe_period(prect, h,
+					per, _elapsed):
+				stance_unsafe = true
+				break
+	if timed_ahead and on_floor and safe_here and dir != 0.0 \
+			and not stance_unsafe \
+			and _plan_timed_kind != "saw_runin":
 		_block_wait += 1.0 / 60.0
 		if _block_wait < BLOCK_WAIT_MAX:
 			_plan_active = false
 			return {"dir": 0.0, "jump": false, "waiting": true}
+		if timed_saw_ahead:
+			return {"dir": 0.0, "jump": false, "waiting": true}
 		_block_wait = 0.0
 	else:
 		_block_wait = 0.0
+	# Stage 1 run-in wait: hold at the SAFE departure point until
+	# t_dep. The hero never waits at the takeoff (it may be inside
+	# the swept zone) and never waits inside the swept zone.
+	if _plan_active and _plan_timed_kind == "saw_runin" \
+			and _elapsed < _plan_t_dep and on_floor \
+			and absf(feet.x - _plan_dep_x) <= 12.0:
+		return {"dir": 0.0, "jump": false, "waiting": true}
 	# Timed-platform departure: hold on safe ground until t_dep.
-	if _plan_active and _plan_timed_kind != "" and _elapsed < _plan_t_dep \
+	if _plan_active and _plan_timed_kind != "" \
+			and _plan_timed_kind != "saw_runin" \
+			and _elapsed < _plan_t_dep \
 			and on_floor and absf(feet.x - _plan_x) <= 12.0:
 		var not_passed: bool = feet.x <= _plan_x + 0.1 if dir > 0.0 \
 				else feet.x >= _plan_x - 0.1
@@ -3270,7 +4318,49 @@ func _decide(level: Dictionary) -> Dictionary:
 		_plan_active = false
 	elif on_floor and dir != 0.0:
 		if _plan_active:
-			if _plan_reached(feet, dir):
+			if _plan_timed_kind == "saw_runin":
+				# Stage 1 (S5): for a timed plan, "reached" is
+				# position AND time: |feet.x - _plan_x| <= 4.05
+				# AND |_elapsed - _plan_takeoff_time| <= PLAN_DT.
+				# S2 (late): drop, never jump late -- the re-solve
+				# searches the NEXT period. S3 (at the takeoff but
+				# early): drop too; the hero must NOT wait at the
+				# takeoff (it may be lethal) and must NOT jump
+				# early. The re-solve runs in this same frame
+				# (_recheck_due via the sentinel _plan_next_check_x).
+				if _elapsed > _plan_takeoff_time + PLAN_DT:
+					_plan_active = false
+					_plan_timed_kind = ""
+					_plan_t_dep = -1.0
+				elif absf(feet.x - _plan_x) <= PLAN_KNIFE_EDGE \
+						and absf(_elapsed - _plan_takeoff_time) \
+								<= PLAN_DT:
+					planned_jump = true
+					_flight_brake_x = _plan_brake_x
+					_flight_active = _plan_brake_x >= 0.0
+					_plan_active = false
+					_plan_timed_kind = ""
+					_plan_t_dep = -1.0
+					var jump_phase: float = 0.0
+					if not _plan_saw.is_empty():
+						jump_phase = fposmod(_elapsed,
+								_saw_period(_plan_saw))
+					print("SAW_RUNIN_JUMP feet.x=%.2f elapsed=%.4f "
+							% [feet.x, _elapsed]
+							+ "phase=%.4f" % jump_phase)
+				elif (dir > 0.0 and feet.x > _plan_x + PLAN_KNIFE_EDGE) \
+						or (dir < 0.0 and feet.x < _plan_x - PLAN_KNIFE_EDGE):
+					# past the exec point without firing: drop, re-solve next period
+					_plan_active = false
+					_plan_timed_kind = ""
+					_plan_t_dep = -1.0
+				elif _plan_overshot(feet, dir):
+					_plan_active = false
+					_plan_timed_kind = ""
+					_plan_t_dep = -1.0
+				else:
+					plan_holds = true
+			elif _plan_reached(feet, dir):
 				if _plan_board:
 					_plan_active = false
 					_plan_board = false
@@ -3293,11 +4383,39 @@ func _decide(level: Dictionary) -> Dictionary:
 				_plan_timed_kind = str(plan.get("timed_kind", ""))
 				_plan_board = bool(plan.get("board", false))
 				_plan_t_exit = float(plan.get("t_exit", -1.0))
+				# Stage 1: run-in plan state (defaults keep
+				# dashed/mover plans unchanged).
+				_plan_dep_x = float(plan.get("dep_x",
+						float(plan["takeoff"])))
+				_plan_takeoff_time = float(plan.get("takeoff_time",
+						-1.0))
+				_plan_saw = plan.get("saw", {})
 				_plan_marginal = _plan_marginal \
 						or bool(plan.get("marginal", false))
 				_plan_blocked_by = ""
 				_plan_active = true
-				if _plan_reached(feet, dir):
+				# Stage 2 pillar fix: log the adopted plan when
+				# it is a pillar-top landing or a timed mover
+				# boarding, so the verification log shows the
+				# PLANNED route, not a greedy accident.
+				if (float(plan.get("land_y", -1.0)) >= 0.0 \
+						and absf(float(plan.get("land_y", -1.0)) \
+								- feet.y) > 1.0) \
+						or _plan_timed_kind == "mover":
+					print("PLAN_PICK takeoff=%.2f land=(%.2f,%.2f) "
+							% [float(plan["takeoff"]),
+							float(plan.get("land_x", -1.0)),
+							float(plan.get("land_y", -1.0))]
+							+ "kind=%s t_dep=%.4f t_exit=%.4f elapsed=%.4f" % [
+							_plan_timed_kind, _plan_t_dep,
+							_plan_t_exit, _elapsed])
+				if _plan_timed_kind == "saw_runin" \
+						and _elapsed < _plan_t_dep:
+					# Fresh run-in plan, still at the departure
+					# point: wait here until t_dep (the wait
+					# branch above owns later frames).
+					wait_at_dep = true
+				elif _plan_reached(feet, dir):
 					if _plan_board and _plan_timed_kind != "" \
 							and _elapsed < _plan_t_dep:
 						# Fresh timed plan, already at the departure
@@ -3460,6 +4578,12 @@ func _reset_attempt_state(wait_offset: float) -> void:
 	_plan_timed_kind = ""
 	_plan_board = false
 	_plan_t_exit = -1.0
+	_plan_dep_x = 0.0
+	_plan_takeoff_time = -1.0
+	_plan_saw = {}
+	_saw_solve_depth = 0
+	_saw_last_solve_x = -1e9
+	_saw_last_solve_key = ""
 	_plan_blocked_by = ""
 	_plan_marginal = false
 	_last_blocked_by = ""
@@ -3478,6 +4602,9 @@ func _play_attempt(level: Dictionary, steps_cap: int) -> Dictionary:
 		_update_triggers(level)
 		_update_falling_flags()
 		if _check_died(level):
+			print("AUTOPILOT_DIED id=%s feet=(%.1f,%.1f) elapsed=%.4f steps=%d" % [
+					str(level.get("id", "?")), _feet_pos().x,
+					_feet_pos().y, _elapsed, steps])
 			return {"outcome": "died", "steps": steps,
 					"marginal": _plan_marginal,
 					"blocked_by": _plan_blocked_by}

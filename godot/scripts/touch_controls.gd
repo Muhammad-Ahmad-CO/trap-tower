@@ -14,6 +14,17 @@ extends Node2D
 # Drawn outline rects (logical 1280x720). Bottom corners, like the
 # reference: move chevrons bottom-left, jump chevron bottom-right
 # and larger.
+# PRESS_FILL_ALPHA (Lane 2c, Part B): the press fill MUST stay
+# semi-transparent. The user found on his own phone test of v1.0.4
+# (20 Nov 04:03 PKT) that the buttons HIDE the floor behind them —
+# the old opaque press fill (alpha 1.0) covered the floor/hazards
+# exactly while the player holds move/jump, i.e. most of the time.
+# At 0.35 the floor edge and hazards stay clearly visible through a
+# pressed chevron while the fill still reads as "pressed" (the rest
+# state has no fill at all). Verified visually on a light palette
+# (L001) and a dark palette (L066); see
+# verification/shots-touch-lane2c/.
+const PRESS_FILL_ALPHA := 0.35
 var left_rect := Rect2(150, 600, 180, 80)
 var right_rect := Rect2(360, 600, 180, 80)
 var jump_rect := Rect2(950, 590, 210, 90)
@@ -155,7 +166,11 @@ func _draw() -> void:
 
 
 # One outlined chevron. Outline = light colour, 5px, transparent fill
-# at rest; fill-on-press fills the chevron with the light colour.
+# at rest; fill-on-press fills the chevron with the light colour at
+# PRESS_FILL_ALPHA — semi-transparent, so the floor and hazards
+# underneath stay visible while the button is held. Pressed and rest
+# share the same dark-edge + light outline; only the fill differs,
+# so the pressed state stays readable on light and dark palettes.
 func _draw_button(r: Rect2, button: String) -> void:
 	var pressed := _held(button)
 	var c := r.get_center()
@@ -186,9 +201,12 @@ func _draw_button(r: Rect2, button: String) -> void:
 			Vector2(r.position.x, c.y + 6),
 		])
 	if pressed:
-		draw_colored_polygon(pts, light_col)
+		var fill_col := light_col
+		fill_col.a = PRESS_FILL_ALPHA
+		draw_colored_polygon(pts, fill_col)
 		var closed := pts + PackedVector2Array([pts[0]])
-		draw_polyline(closed, dark_col, 4.0, true)
+		draw_polyline(closed, dark_col, 9.0, true)
+		draw_polyline(closed, light_col, 5.0, true)
 	else:
 		var closed2 := pts + PackedVector2Array([pts[0]])
 		# Dark edge behind the light outline (both palette colours):

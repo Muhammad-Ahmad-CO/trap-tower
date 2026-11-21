@@ -18,7 +18,11 @@ extends Node
 # (level_<ID>_phase2.png at 2.6s vs the 1.0s shot) for L098, L036,
 # L056 and L031, each gated on a pixel diff > 0 (a 0-diff pair is
 # INVALID — it proves no second trap phase, the v2 L001 lesson).
-# There is NO picker in v3: no picker.png is captured.
+# v1.0.5 picker captures (NEW): picker_door3.png (door 3, 4 stages),
+# picker_door14.png (door 14, mid-game), picker_door44.png (door 44,
+# single final stage) and picker_return_win.png (the map auto-reopening
+# door 3's picker from TTState.return_door — the post-win path, with
+# NO direct open_picker call).
 # Progress fixtures are written to user://progress.cfg (save_version 3)
 # before map captures; a FRESH empty progress is restored at the end.
 
@@ -110,6 +114,45 @@ func _run() -> void:
 	map_inst.call("open_settings")
 	await _capture_now(_out_dir + "/settings.png")
 	map_inst.call("close_settings")
+	await _remove(map_inst)
+
+	# v1.0.5 picker captures: door 3 (4 stages), door 14 (mid-game),
+	# door 44 (single final stage) — each via the real open_picker
+	# path on a fixture that unlocks the door.
+	var picker_specs: Array = [[3, 14], [14, 70], [44, 214]]
+	for spec in picker_specs:
+		var door: int = spec[0]
+		var hi: int = spec[1]
+		var done_ids2: Array[String] = []
+		for k in range(mini(hi, _levels.size())):
+			done_ids2.append(str(_levels[k].get("id", "")))
+		_write_progress(hi, done_ids2)
+		map_inst = map_scene.instantiate()
+		add_child(map_inst)
+		await _settle(0.6)
+		map_inst.call("open_picker", door)
+		await _settle(0.3)
+		var pk: Control = map_inst.get("_picker")
+		print("SHOT picker door=", door, " visible=", pk.visible if pk != null else false,
+			" title=", str(map_inst.get("_picker_title").get("text")) if map_inst.get("_picker_title") != null else "?")
+		await _capture_now(_out_dir + "/picker_door" + str(door) + ".png")
+		await _remove(map_inst)
+
+	# Picker auto-return after a win: NO open_picker call — the map
+	# re-opens door 3's picker itself from TTState.return_door, on a
+	# post-win fixture (highest 13, L001-L013 completed).
+	var win_done: Array[String] = []
+	for k in range(mini(13, _levels.size())):
+		win_done.append(str(_levels[k].get("id", "")))
+	_write_progress(13, win_done)
+	TTState.return_door = 3
+	map_inst = map_scene.instantiate()
+	add_child(map_inst)
+	await _settle_and_capture(_out_dir + "/picker_return_win.png", 0.6)
+	var rpk: Control = map_inst.get("_picker")
+	print("SHOT picker_return_win visible=", rpk.visible if rpk != null else false,
+		" door=", map_inst.get("_picker_door"))
+	TTState.return_door = -1
 	await _remove(map_inst)
 
 	# Game states: pause, death, skip — one instance, real paths.

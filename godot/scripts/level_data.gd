@@ -576,6 +576,14 @@ static func _vis_check_hazard_grounding(h: Dictionary, i: int, plats: Array, gro
 	elif htype == "saw":
 		var rad := float(h.get("r", 0))
 		var centres := _vis_saw_centres(h)
+		# Rule 7 (Stage 2 §4.3 R1, mirrors check_levels.py): a MOVING saw
+		# (path/swing) is grounded iff AT LEAST ONE swept centre touches
+		# solid. A gap-patrol disc inherently cannot touch solid over the
+		# gap, so the old per-sample rule warned on every such saw by
+		# construction. Static saws have one centre, so the rule is
+		# unchanged for them.
+		var moving := h.has("path") or h.has("swing")
+		var any_touches := false
 		for k in range(centres.size()):
 			var touches := false
 			for j in range(plats.size()):
@@ -584,9 +592,14 @@ static func _vis_check_hazard_grounding(h: Dictionary, i: int, plats: Array, gro
 				if _point_rect_dist(centres[k].x, centres[k].y, _vis_rect(plats[j])) <= rad + GROUND_TOL:
 					touches = true
 					break
-			if not touches:
+			if touches:
+				any_touches = true
+				break
+			if not moving:
 				out.append("level %s rule 7: hazards[%d] saw disc does not touch solid geometry at sweep sample %d" % [id, i, k])
 				break
+		if moving and not any_touches:
+			out.append("level %s rule 7: hazards[%d] saw disc does not touch solid geometry at any sweep sample" % [id, i])
 		if h.has("swing"):
 			var sw: Dictionary = h["swing"]
 			var pivot := Vector2(float(sw.get("pivot_x", 0)), float(sw.get("pivot_y", 0)))

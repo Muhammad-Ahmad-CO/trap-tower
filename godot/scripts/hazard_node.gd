@@ -272,7 +272,15 @@ func _draw_saw() -> void:
 	# the mount is visible. Drawn before the disc; static/path saws
 	# are unchanged. Drawing only.
 	if has_swing:
-		draw_line(swing_pivot, c, trap_col, 3.0)
+		# Chain, drawn THICK (O3 fix): a 5px spine plus link beads
+		# every ~16px, so the mount reads clearly at 1x on a phone.
+		# Drawing only — pivot, centre, timing, collision unchanged.
+		draw_line(swing_pivot, c, trap_col, 5.0)
+		var chain_len := swing_pivot.distance_to(c)
+		var steps := maxi(1, int(chain_len / 16.0))
+		for s in range(1, steps):
+			var lp := swing_pivot.lerp(c, float(s) / float(steps))
+			draw_circle(lp, 3.5, trap_col)
 	var teeth := 18
 	var pts := PackedVector2Array()
 	for i in range(teeth * 2):
@@ -298,6 +306,7 @@ func _draw_pillar() -> void:
 	var cx := pillar_home.x + rect.size.x * 0.5
 	if pillar_hanging:
 		# Cable from the HUD band edge (y=90), not from y=0, so no
-		# drawn pixel enters the HUD band. Drawing only.
-		draw_line(Vector2(cx, 90), Vector2(cx, top), trap_col, 3.0)
+		# drawn pixel enters the HUD band. Drawing only. Thickened
+		# to 5px (O3 fix) so it reads at 1x on a phone.
+		draw_line(Vector2(cx, 90), Vector2(cx, top), trap_col, 5.0)
 	draw_rect(Rect2(pillar_home.x, top, rect.size.x, rect.size.y), trap_col)
