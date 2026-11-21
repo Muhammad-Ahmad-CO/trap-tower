@@ -5,16 +5,19 @@
 #     --fixed-fps 60 --path <project> \
 #     -s /home/hatch/workspace/trap-tower/repo/tools/probes/n8_effekseer_probe.gd
 #
-# Triggers all three effects through the REAL game paths (hazard death,
-# hard landing, door win) and, for each, prints the live discriminator:
-#   * the fx flag (_fx_mode / _dust_fx) — while true, the code-drawn
-#     _draw()/_draw_dust() is a no-op (see death_particles.gd,
-#     confetti_particles.gd, player.gd), so NOTHING code-drawn can appear;
-#   * alive_count (30 / 6 / 36);
+# Triggers the two remaining effects through the REAL game paths (hazard
+# death, door win) and asserts ZERO landing dust on a hard landing (Fix 1,
+# phone verdict 21 Nov 2026 — the dust effect is REMOVED, no replacement).
+# For each effect, prints the live discriminator:
+#   * the fx flag (_fx_mode) — while true, the code-drawn _draw() is a
+#     no-op (see death_particles.gd, confetti_particles.gd), so NOTHING
+#     code-drawn can appear;
+#   * alive_count (30 / 36);
 #   * the live emitter node(s): class name + is_playing();
 #   * count of EffekseerEmitter2D nodes in the live scene tree.
 # Captures fresh screenshots at burst peak into
-# verification/shots-v105-final2/n8_fx_{death,dust,confetti}.png.
+# verification/shots-v105-final2/n8_fx_{death,confetti}.png, plus
+# n8_fx_no_dust.png (hard landing — must show ZERO white puffs).
 # Quits 0 only if every check passes. Restores a FRESH empty progress.
 # No gameplay code is touched by this probe.
 
@@ -59,7 +62,13 @@ func _run() -> void:
 		and Engine.has_singleton("EffekseerSystem"))
 	_check("death-effect-loads", EffekseerFX.death_effect() != null)
 	_check("confetti-effect-loads", EffekseerFX.confetti_effect() != null)
-	_check("dust-effect-loads", EffekseerFX.dust_effect() != null)
+	# Fix 1: the dust API is GONE — no dust_effect / spawn_dust on the class.
+	var fx_methods: Array = []
+	for m in (load("res://scripts/effekseer_fx.gd") as Script).get_script_method_list():
+		fx_methods.append(str(m["name"]))
+	_check("dust-api-gone", not ("dust_effect" in fx_methods)
+		and not ("spawn_dust" in fx_methods),
+		"EffekseerFX must not expose dust_effect/spawn_dust")
 
 	var loaded := TTLevelData.load_levels()
 	if str(loaded.get("error", "")) != "":
@@ -113,12 +122,14 @@ func _run() -> void:
 		await _wait_retry(game_inst)
 		await _settle(0.3)
 
-	# --- (2) LANDING DUST via a hard landing --------------------------
+	# --- (2) ZERO LANDING DUST on a hard landing (Fix 1) --------------
+	# The dust is REMOVED: no _dust / _dust_fx on the player, no
+	# EffekseerEmitter2D parented to the player, no dust effect file.
 	var player := game_inst.get("player") as Node2D
 	var runtime: Node = game_inst.get("runtime")
 	var landed := false
-	var dust_fx := false
-	var dust_n := 0
+	var dust_gone := false
+	var player_ems := -1
 	if player != null:
 		var spawn_d: Dictionary = (levels[death_idx] as Dictionary)["spawn"]
 		player.global_position = Vector2(float(spawn_d["x"]), float(spawn_d["y"]) - 120.0)
@@ -127,15 +138,19 @@ func _run() -> void:
 			await physics_frame
 			if float(player.get("_squash")) > 0.5:
 				landed = true
-				dust_fx = bool(player.get("_dust_fx"))
-				dust_n = (player.get("_dust") as Array).size()
+				dust_gone = player.get("_dust") == null \
+					and player.get("_dust_fx") == null
+				player_ems = _count_emitters(player).size()
 				break
-	print("N8 DUST: landed=", landed, " _dust_fx=", dust_fx, " _dust.size()=", dust_n)
+	print("N8 NO-DUST: landed=", landed, " dust_gone=", dust_gone,
+		" player_emitters=", player_ems)
 	_check("dust-landed", landed, "squash>0.5 on hard landing")
-	_check("dust-fx-mode", dust_fx, "_dust_fx=true => code _draw_dust() is a no-op")
-	_check("dust-entries-6", dust_n == 6, "entries=" + str(dust_n))
+	_check("dust-gone", landed and dust_gone,
+		"_dust/_dust_fx must not exist on the player")
+	_check("dust-zero-emitters", landed and player_ems == 0,
+		"player emitters=" + str(player_ems) + " (must be 0)")
 	if landed:
-		await _capture_now(_out + "/n8_fx_dust.png")
+		await _capture_now(_out + "/n8_fx_no_dust.png")
 
 	# --- (3) DOOR CONFETTI via a real door win ------------------------
 	var confetti_n := -1

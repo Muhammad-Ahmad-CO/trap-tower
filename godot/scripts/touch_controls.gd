@@ -11,31 +11,42 @@ extends Node2D
 # its finger drags off it or lifts. No stuck input.
 # Works standalone (default rects/colours) and via setup() from the game.
 
-# Drawn outline rects (logical 1280x720). Bottom corners, like the
-# reference: move chevrons bottom-left, jump chevron bottom-right
-# and larger.
+# Drawn outline rects (logical 1280x720). Upper-middle sky band, per the
+# user's white box on his phone screenshot (21 Nov 15:04 PKT): move
+# chevrons at the band's left end, jump chevron at the band's right end,
+# all vertically centred in the band (centre y ~286). The band sits below
+# the HUD and above the floor and the hero's jump arc on ground levels;
+# on high-platform levels the hero may pass behind the transparent
+# outlines (rest state has no fill; press fill is 0.35, so the hero and
+# hazards stay visible through a pressed chevron).
 # PRESS_FILL_ALPHA (Lane 2c, Part B): the press fill MUST stay
 # semi-transparent. The user found on his own phone test of v1.0.4
 # (20 Nov 04:03 PKT) that the buttons HIDE the floor behind them —
 # the old opaque press fill (alpha 1.0) covered the floor/hazards
 # exactly while the player holds move/jump, i.e. most of the time.
 # At 0.35 the floor edge and hazards stay clearly visible through a
-# pressed chevron while the fill still reads as "pressed" (the rest
-# state has no fill at all). Verified visually on a light palette
-# (L001) and a dark palette (L066); see
-# verification/shots-touch-lane2c/.
+# pressed chevron. The fill COLOUR is press_col — the palette colour
+# contrasting with the sky (dark on light skies, light on dark skies)
+# — because a light_col fill was invisible on L001, where light_col IS
+# the orange sky (tint fix, 21 Nov; verified on L001 + L066, see
+# verification/tint-fix/).
 const PRESS_FILL_ALPHA := 0.35
-var left_rect := Rect2(150, 600, 180, 80)
-var right_rect := Rect2(360, 600, 180, 80)
-var jump_rect := Rect2(950, 590, 210, 90)
+var left_rect := Rect2(100, 246, 180, 80)
+var right_rect := Rect2(310, 246, 180, 80)
+var jump_rect := Rect2(970, 241, 210, 90)
 # Generous hitboxes, larger than the drawn outlines (recomputed in
 # setup(); defaults match the standalone rects above).
-var left_hit := Rect2(128, 578, 224, 124)
-var right_hit := Rect2(338, 578, 224, 124)
-var jump_hit := Rect2(928, 568, 254, 134)
+var left_hit := Rect2(78, 224, 224, 124)
+var right_hit := Rect2(288, 224, 224, 124)
+var jump_hit := Rect2(948, 219, 254, 134)
 
 var light_col := Color.html("E8871E")
 var dark_col := Color.html("2B0A8A")
+
+# Press-fill colour: the palette colour CONTRASTING with the sky the
+# buttons sit over (set in setup(); default = dark, matching the
+# default orange sky). Tint fix, 21 Nov.
+var press_col := Color.html("2B0A8A")
 
 var _fingers := {}
 
@@ -55,17 +66,23 @@ func setup(_tuning: Dictionary, pal: Dictionary) -> void:
 	# read. Colour = the lighter of the level's bg/trap.
 	var bg := TTuning.col(str(pal.get("bg", "#E8871E")))
 	var trap := TTuning.col(str(pal.get("trap", "#2B0A8A")))
-	if _luminance(bg) >= _luminance(trap):
+	var bg_is_light := _luminance(bg) >= _luminance(trap)
+	if bg_is_light:
 		light_col = bg
 		dark_col = trap
 	else:
 		light_col = trap
 		dark_col = bg
+	# Press fill = the palette colour that CONTRASTS with the sky the
+	# buttons sit over (the other palette colour): dark on light skies,
+	# light on dark skies. Tint fix (21 Nov): the old light_col fill was
+	# invisible on L001 because light_col IS the orange sky.
+	press_col = dark_col if bg_is_light else light_col
 	# Drawing only: controls render above all level art.
 	z_index = 100
-	left_rect = Rect2(150, 600, 180, 80)
-	right_rect = Rect2(360, 600, 180, 80)
-	jump_rect = Rect2(950, 590, 210, 90)
+	left_rect = Rect2(100, 246, 180, 80)
+	right_rect = Rect2(310, 246, 180, 80)
+	jump_rect = Rect2(970, 241, 210, 90)
 	_refresh_hits()
 	queue_redraw()
 
@@ -166,11 +183,15 @@ func _draw() -> void:
 
 
 # One outlined chevron. Outline = light colour, 5px, transparent fill
-# at rest; fill-on-press fills the chevron with the light colour at
-# PRESS_FILL_ALPHA — semi-transparent, so the floor and hazards
-# underneath stay visible while the button is held. Pressed and rest
-# share the same dark-edge + light outline; only the fill differs,
-# so the pressed state stays readable on light and dark palettes.
+# at rest; fill-on-press fills the chevron with press_col (the palette
+# colour contrasting with the sky — dark on light skies, light on dark
+# skies) at PRESS_FILL_ALPHA — semi-transparent, so the floor and
+# hazards underneath stay visible while the button is held. Pressed
+# and rest share the same dark-edge + light outline; only the fill
+# differs, so the pressed state reads on light and dark palettes.
+# (A light_col fill did NOT read on light palettes: on L001 light_col
+# IS the orange sky, so pressed == rest pixel-for-pixel. Tint fix,
+# 21 Nov.)
 func _draw_button(r: Rect2, button: String) -> void:
 	var pressed := _held(button)
 	var c := r.get_center()
@@ -201,7 +222,7 @@ func _draw_button(r: Rect2, button: String) -> void:
 			Vector2(r.position.x, c.y + 6),
 		])
 	if pressed:
-		var fill_col := light_col
+		var fill_col := press_col
 		fill_col.a = PRESS_FILL_ALPHA
 		draw_colored_polygon(pts, fill_col)
 		var closed := pts + PackedVector2Array([pts[0]])

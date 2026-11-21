@@ -1,7 +1,7 @@
 class_name EffekseerFX
 # Shared Effekseer spawn helper (Lane 7, Trap Tower v1.0.5).
 #
-# Loads the three authored .efkefc effects once and spawns them.
+# Loads the two authored .efkefc effects once and spawns them.
 # Every spawn reports success, so callers can fall back to the existing
 # code-drawn particles when the plugin or an effect is unavailable.
 # Never crashes: if the plugin classes / singleton / effect are missing,
@@ -13,7 +13,6 @@ class_name EffekseerFX
 
 const DEATH_PATH := "res://assets/effects/death_burst.efkefc"
 const CONFETTI_PATH := "res://assets/effects/door_confetti.efkefc"
-const DUST_PATH := "res://assets/effects/landing_dust.efkefc"
 
 # Door confetti tints (same palette as the code-drawn pieces): white,
 # HUD yellow, HUD dark-red. One 12-piece effect spawn per tint == 36.
@@ -25,7 +24,6 @@ const CONFETTI_COLOURS: Array[Color] = [
 
 static var _death: Resource = null
 static var _confetti: Resource = null
-static var _dust: Resource = null
 static var _checked := false
 static var _available := false
 
@@ -57,12 +55,6 @@ static func confetti_effect() -> Resource:
 	return _confetti
 
 
-static func dust_effect() -> Resource:
-	if _dust == null:
-		_dust = _load(DUST_PATH)
-	return _dust
-
-
 # One-shot emitter: plays once, frees itself when finished (autofree).
 # Returns the emitter node, or null when the effect could not spawn.
 # `at` is in the parent's local space; `tint` multiplies the effect colour.
@@ -81,14 +73,3 @@ static func spawn_one_shot(effect: Resource, parent: Node, at: Vector2, tint: Co
 	emitter.position = at
 	emitter.call("play")
 	return emitter
-
-
-# Dust via the EffekseerSystem spawn API (auto-plays, auto-frees).
-# Returns true when the effect was spawned.
-static func spawn_dust(parent: Node, at: Vector2) -> bool:
-	var fx := dust_effect()
-	if fx == null or parent == null or not available():
-		return false
-	var sys: Object = Engine.get_singleton("EffekseerSystem")
-	sys.call("spawn_effect_2d", fx, parent, Transform2D(0.0, at))
-	return true

@@ -160,18 +160,18 @@ class DashedPlatform extends StaticBody2D:
 
 class FallingPlatform extends StaticBody2D:
 	var stand_time: float = 0.5
-	var gravity: float = 2200.0
+	var sink_speed: float = 160.0
 	var stood_time: float = 0.0
 	var stood: bool = false
 	var falling: bool = false
-	var fall_vel: float = 0.0
 	var shape: CollisionShape2D = null
 	var plat_size: Vector2 = Vector2.ZERO
 
 	func _physics_process(delta: float) -> void:
 		if falling:
-			fall_vel += gravity * delta
-			position.y += fall_vel * delta
+			# Fix 2 mirror of TTPlatform: constant 160 px/s sink DOWN,
+			# no acceleration — same motion as the shipped game code.
+			position.y += sink_speed * delta
 			return
 		# Stand timer latches: stepping off does not reset it (trap-like).
 		if stood:
@@ -587,7 +587,7 @@ func _build_harness_level(level: Dictionary) -> bool:
 		elif kind == "falling" or kind == "tilting":
 			var f := FallingPlatform.new()
 			f.stand_time = float(p["stand_time"])
-			f.gravity = float(_player_cfg["gravity"])
+			f.sink_speed = 160.0
 			f.plat_size = Vector2(float(p["w"]), float(p["h"]))
 			body = f
 			shape = _rect_body(body, cx, cy, float(p["w"]), float(p["h"]))

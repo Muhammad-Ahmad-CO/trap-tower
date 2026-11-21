@@ -60,16 +60,11 @@ func apply_skin(skin: Dictionary) -> void:
 	_skin_accent = TTuning.col(str(skin.get("accent", "#FFFFFF")))
 	_skin_shape = str(skin.get("shape", "classic"))
 	queue_redraw()
-# EXCEED landing dust (draw-only): white puffs at the feet on hard
-# landings; they rise slightly, fade in ~0.35s, never touch physics.
-# EFFEKSEER (Lane 7, v1.0.5): the puffs are drawn by the authored
-# res://assets/effects/landing_dust.efkefc (6 soft circles, same motion
-# model). The _dust entries stay as the live record (probes read their
-# count) and decay in _update_dust as before; _draw_dust skips drawing
-# them while _dust_fx is true. If the effect is unavailable, the code
-# puffs draw exactly as before.
-var _dust: Array = []
-var _dust_fx := false
+# Landing dust REMOVED (Fix 1, phone verdict 21 Nov 2026): the white
+# landing puffs (code-drawn + Effekseer landing_dust.efkefc) accumulated
+# into a screen-wide cloud on the user's phone. No replacement effect:
+# hard landings now show squash + land sound only. Death burst (black
+# squares) and door confetti are untouched.
 
 
 func setup(tuning: Dictionary) -> void:
@@ -131,41 +126,6 @@ func reset_state() -> void:
 	run_phase = 0.0
 	facing = 1
 	_squash = 0.0
-	_dust = []
-
-
-func _spawn_dust() -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = int(Time.get_ticks_msec()) + int(global_position.x)
-	for i in range(6):
-		_dust.append({
-			"pos": Vector2(rng.randf_range(-10.0, 10.0), ph * 0.5 - 2.0),
-			"vel": Vector2(rng.randf_range(-45.0, 45.0),
-				rng.randf_range(-55.0, -15.0)),
-			"size": rng.randf_range(4.0, 8.0),
-			"life": 0.35,
-			"max_life": 0.35,
-		})
-	# Effekseer dust at the feet (local pos); falls back to the code
-	# puffs above when the effect is unavailable.
-	_dust_fx = EffekseerFX.spawn_dust(self, Vector2(0, ph * 0.5))
-
-
-func _update_dust(delta: float) -> void:
-	if _dust.is_empty():
-		_dust_fx = false
-		return
-	var keep: Array = []
-	for d in _dust:
-		var dd: Dictionary = d
-		dd["pos"] = (dd["pos"] as Vector2) + (dd["vel"] as Vector2) * delta
-		dd["vel"] = (dd["vel"] as Vector2) + Vector2(0, 40.0) * delta
-		dd["life"] = float(dd["life"]) - delta
-		if float(dd["life"]) > 0.0:
-			keep.append(dd)
-	_dust = keep
-	if _dust.is_empty():
-		_dust_fx = false
 
 
 func feet_pos() -> Vector2:
@@ -207,10 +167,8 @@ func _physics_process(delta: float) -> void:
 	if was_air and is_on_floor() and fall_vy > 200.0:
 		_squash = 1.0
 		TTAudio.play_land()
-		_spawn_dust()
 	if _squash > 0.0:
 		_squash = maxf(0.0, _squash - delta / 0.12)
-	_update_dust(delta)
 	if is_on_floor() and absf(velocity.x) > 10.0:
 		run_phase += delta * absf(velocity.x) * 0.055
 	queue_redraw()
@@ -240,16 +198,6 @@ func _draw() -> void:
 	elif _rel_luminance(_skin_body) > 0.6:
 		_draw_pose(Color(0.10, 0.10, 0.18), 1.5)
 	_draw_pose(_skin_body, 0.0)
-	_draw_dust()
-
-
-func _draw_dust() -> void:
-	if _dust_fx:
-		return  # Effekseer draws the puffs; nothing to draw here.
-	for d in _dust:
-		var dd: Dictionary = d
-		var a := clampf(float(dd["life"]) / float(dd["max_life"]), 0.0, 1.0) * 0.7
-		draw_circle(dd["pos"], float(dd["size"]), Color(1, 1, 1, a))
 
 
 func _draw_pose(col: Color, grow: float) -> void:

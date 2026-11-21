@@ -2,8 +2,10 @@ class_name TTPlatform
 extends AnimatableBody2D
 
 # One node for all platform kinds, driven only by declarative level params.
-# solid: static. dashed: blinking solid/faint. falling/tilting: drops after
-# stand_time (no respawn until restart). moving: sine round trip, carries player.
+# solid: static. dashed: blinking solid/faint. falling/tilting: sinks DOWN
+# at a constant 160 px/s after stand_time (no respawn until restart) —
+# fully visible descent, never a blink/vanish (Fix 2, phone verdict).
+# moving: sine round trip, carries player.
 
 var kind := "solid"
 var rect := Rect2()
@@ -17,7 +19,6 @@ var gravity := 2200.0
 var elapsed := 0.0
 var start_pos := Vector2.ZERO
 var falling := false
-var fall_vy := 0.0
 var stand_timer := 0.0
 var solid_now := true
 var player: TTPlayer = null
@@ -52,7 +53,6 @@ func setup(d: Dictionary, color: Color, p_gravity: float) -> void:
 func reset_state() -> void:
 	elapsed = 0.0
 	falling = false
-	fall_vy = 0.0
 	stand_timer = 0.0
 	solid_now = true
 	rotation = 0.0
@@ -77,8 +77,11 @@ func _physics_process(delta: float) -> void:
 			else:
 				stand_timer = 0.0
 		if falling:
-			fall_vy += gravity * delta
-			position.y += fall_vy * delta
+			# Fix 2 (phone verdict): constant 160 px/s sink DOWN — no
+			# acceleration, no gravity fall. The floor stays visible
+			# the whole way down and is gone only once it has sunk
+			# below the play area; it never blinks out and back.
+			position.y += 160.0 * delta
 			if kind == "tilting":
 				rotation += delta * 0.9
 			# Disable collision once the platform top has fallen past

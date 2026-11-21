@@ -7,7 +7,7 @@ extends Node
 # Captures to verification/exceed/shots/:
 #   map_idle_t0.png / map_idle_t1.png (idle ring animation, 1.0s apart)
 #   death_burst_new.png (burst at death, alive_count printed)
-#   landing_squash.png (squash + dust at a hard landing)
+#   landing_squash.png (squash at a hard landing — ZERO dust, Fix 1)
 #   confetti.png (door-enter celebration, alive_count printed)
 # Prints: tone log (jump/land/death/win/skip), wipe cover/reveal ms.
 # Quits 0 only if every check passes; a FRESH empty progress is
@@ -115,13 +115,17 @@ func _run() -> void:
 		await _wait_retry(game_inst)
 		await _settle(0.3)
 
-	# (b) landing squash + dust: drop the hero 250px above its spawn
-	# onto safe ground (spawn has a 40px hazard-free zone).
+	# (b) landing squash, ZERO dust (Fix 1, phone verdict 21 Nov 2026):
+	# drop the hero 250px above its spawn onto safe ground (spawn has
+	# a 40px hazard-free zone). The landing dust is REMOVED — no code
+	# puffs, no Effekseer emitter on the player. Squash + land sound
+	# are the only landing feedback left.
 	var player := game_inst.get("player") as Node2D
 	var runtime: Node = game_inst.get("runtime")
 	var landed := false
 	var squash_v := 0.0
-	var dust_n := 0
+	var dust_gone := false
+	var dust_emitters := -1
 	if player != null:
 		var spawn_d: Dictionary = (levels[death_idx] as Dictionary)["spawn"]
 		var drop_from := Vector2(float(spawn_d["x"]), float(spawn_d["y"]) - 120.0)
@@ -133,10 +137,17 @@ func _run() -> void:
 			if sq > 0.5:
 				landed = true
 				squash_v = sq
-				dust_n = (player.get("_dust") as Array).size()
+				# _dust / _dust_fx no longer exist on the player, and
+				# no EffekseerEmitter2D may be parented to it.
+				dust_gone = player.get("_dust") == null \
+					and player.get("_dust_fx") == null
+				dust_emitters = _count_emitters(player).size()
 				break
 	_check("landing-squash", landed,
-		"squash=" + str(squash_v) + " dust_pieces=" + str(dust_n))
+		"squash=" + str(squash_v))
+	_check("landing-zero-dust", landed and dust_gone and dust_emitters == 0,
+		"_dust/_dust_fx gone=" + str(dust_gone)
+		+ " player_emitters=" + str(dust_emitters) + " (must be 0)")
 	if landed:
 		await _capture_now(_out_dir + "/landing_squash.png")
 
@@ -171,6 +182,18 @@ func _run() -> void:
 		get_tree().quit(0)
 	else:
 		get_tree().quit(1)
+
+
+func _count_emitters(inst: Node) -> Array:
+	var found: Array = []
+	var stack: Array = [inst]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n.get_class() == "EffekseerEmitter2D":
+			found.append(n)
+		for c in n.get_children():
+			stack.append(c)
+	return found
 
 
 func _find_death_level(levels: Array) -> int:
