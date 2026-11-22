@@ -3959,15 +3959,17 @@ PILOT_SKELETONS = {
          4: "corridor-ceiling", 5: "step-plateau-ceiling"},
     19: {1: "ascent", 2: "valley-stairs", 3: "terrace-stairs",
          4: "double-stair", 5: "tower-stairs"},
-    28: {1: "standard-tower", 2: "narrow-tower", 3: "tall-tower",
-         4: "low-tower", 5: "mirror-tower"},
-    29: {1: "reversed-strips", 2: "reversed-gaps",
-         3: "reversed-columns", 4: "reversed-mixed",
-         5: "reversed-triggered"},
-    31: {1: "standard-shaft", 2: "narrow-shaft", 3: "wide-shaft",
-         4: "left-shaft", 5: "right-shaft"},
-    39: {1: "standard-dashed", 2: "narrow-dashed", 3: "tall-dashed",
-         4: "low-dashed", 5: "mirror-dashed"},
+    28: {1: "tower-standard", 2: "tower-T-floors", 3: "tower-side-shaft",
+         4: "tower-corridor-floors", 5: "tower-mirror"},
+    29: {1: "reversed-flat", 2: "reversed-valley",
+         3: "reversed-stair", 4: "reversed-corridor",
+         5: "reversed-terrace"},
+    31: {1: "shaft-straight", 2: "shaft-stepped-bottom",
+         3: "shaft-side-ledges", 4: "shaft-T-top",
+         5: "shaft-mid-pillar"},
+    39: {1: "dashed-tower-standard", 2: "dashed-tower-T-floors",
+         3: "dashed-tower-side-shaft", 4: "dashed-tower-stepped-floors",
+         5: "dashed-tower-corridor-floors"},
 }
 
 
@@ -4101,7 +4103,7 @@ def v3_d01(c, kk, salt, slot, variant):
         plats += [_v3_ground(c, 1080, 1280)]
         hazards = [_vt(792, 480, 48),
                    _vt(ttx, 640, 24, trigger_x=ttx - lead, delay=0.3)]
-        spawn, door = (90, 640), (1190, 640)
+        spawn, door = (80, 640), (1190, 640)
     elif slot == 2:  # valley-pit
         beams = _vo(variant, [(320, 420), (340, 440), (360, 460)])
         plats = [_vm(c, 0, 560, 400),
@@ -4115,7 +4117,7 @@ def v3_d01(c, kk, salt, slot, variant):
         ttx = _vo(variant, [1040, 1060, 1080])
         hazards = [_vt(800, 640, 40),
                    _vt(ttx, 560, 50, trigger_x=ttx - lead, delay=0.3)]
-        spawn, door = (90, 560), (1190, 560)
+        spawn, door = (100, 560), (1200, 560)
     elif slot == 3:  # U-corridor-pit
         px = _vo(variant, [520, 560, 600])
         plats = [_v3_ground(c, 0, 64),
@@ -4129,7 +4131,7 @@ def v3_d01(c, kk, salt, slot, variant):
                  _v3_ground(c, 1216, 1280)]
         hazards = [_vt(300, 640, 50),
                    _vt(700, 640, 50, trigger_x=700 - lead, delay=0.3)]
-        spawn, door = (120, 480), (1190, 480)
+        spawn, door = (120, 480), (1150, 480)
     elif slot == 4:  # double-pit (two blink pits, offset phases)
         px = _vo(variant, [380, 420, 460])
         qx = px + 330
@@ -4143,7 +4145,7 @@ def v3_d01(c, kk, salt, slot, variant):
         plats += _vwalls(c, [340, 440])
         hazards = [_vt(px + 180, 640, 50),
                    _vt(950, 640, 50, trigger_x=950 - lead, delay=0.3)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (100, 640), (1170, 640)
     else:  # slot 5: step-descent-pit
         px = _vo(variant, [660, 700, 740])
         plats = [_vm(c, 48, 440, 200),
@@ -4155,7 +4157,7 @@ def v3_d01(c, kk, salt, slot, variant):
                  _v3_ground(c, px + 90, 1280)]
         hazards = [_vt(px + 140, 640, 50),
                    _vt(1020, 640, 50, trigger_x=1020 - lead, delay=0.3)]
-        spawn, door = (120, 440), (1190, 640)
+        spawn, door = (120, 440), (1150, 640)
     return plats, hazards, spawn, door, skel
 
 
@@ -4174,7 +4176,7 @@ def v3_d02(c, kk, salt, slot, variant):
         hazards = [_vt(tx, 640, 35), _vt(tx + 83, 640, 35),
                    _vt(tx + 180, 640, 45), _vt(tx + 273, 640, 45),
                    _vt(tx + 400, 640, 50)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (80, 640), (1150, 640)
     elif slot == 2:  # stair-teeth -- REDESIGNED (Lane G5, Round 4):
         # Rise 40 / w48 / offset 48 capped the strip+stepup window at
         # 4.7px (shift ceiling 8.7px). Redesign: rise 32, strip w40 at
@@ -4191,7 +4193,7 @@ def v3_d02(c, kk, salt, slot, variant):
         hazards = [_vt(x0 + 56, 608, 40), _vt(x0 + 152, 576, 40),
                    _vt(x0 + 248, 544, 40), _vt(x0 + 488, 512, 48),
                    _vt(x0 + 592, 544, 48)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (90, 640), (1170, 640)
     elif slot == 3:  # valley-teeth
         plats = [_vm(c, 0, 560, 320),
                  _vm(c, 320, 600, 80), _vm(c, 400, 640, 80),
@@ -4217,7 +4219,7 @@ def v3_d02(c, kk, salt, slot, variant):
         hazards = [_vt(tx, 640, 50), _vt(tx + 120, 640, 50),
                    _vts(48, wy, 70, "right"),
                    _vts(1222, wy, 70, "left")]
-        spawn, door = (90, 560), (1190, 560)
+        spawn, door = (110, 560), (1150, 560)
     elif slot == 4:  # terraces-teeth
         x0 = _vo(variant, [200, 240, 280])
         plats = [_v3_ground(c),
@@ -4226,7 +4228,7 @@ def v3_d02(c, kk, salt, slot, variant):
         plats += _vwalls(c, list(beams))
         hazards = [_vt(x0 + 220, 640, 50), _vt(x0 + 640, 640, 50),
                    _vt(1040, 640, 50)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (100, 640), (1190, 640)
     else:  # slot 5: corridor-teeth (roof beam + down-teeth)
         beams = _vo(variant, [(300, 400), (320, 420), (340, 440)])
         plats = [_v3_ground(c)] + _vwalls(c, list(beams))
@@ -4236,7 +4238,7 @@ def v3_d02(c, kk, salt, slot, variant):
                    _vt(840, 640, 50),
                    _vtd(500, beams[1] + 16, 60),
                    _vtd(900, beams[1] + 16, 60)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (80, 640), (1200, 640)
     return plats, hazards, spawn, door, skel
 
 
@@ -4287,7 +4289,7 @@ def v3_d12(c, kk, salt, slot, variant):
                   _v3_ground(c, 1140, 1280)]
         hazards = [_vt(dx + 160, 640, 50), _vt(916, 480, 50),
                    _h_popup(dx + 260, 640, 35, 3.0, 0.0, 1.4)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (70, 640), (1150, 640)
     elif slot == 3:  # stair-chain (EXCEED: was a shaft layout that
         # converged with D01S3 U-corridor-pit, audit symdiff 3.
         # Now dashed stones bridge an ascending/descending stair
@@ -4327,7 +4329,7 @@ def v3_d12(c, kk, salt, slot, variant):
         plats += _vwalls(c, [320, 440])
         hazards = [_vt(120, 640, 40), _vt(760 + ox, 560, 50),
                    _h_popup(855 + ox, 560, 35, 3.0, 0.0, 1.4)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (70, 640), (1100, 640)
     else:  # slot 5: valley-chain
         dx = _vo(variant, [600, 620, 640])
         # Lane C: first option phase 0.5 (not 0.0) -- the hero
@@ -4361,6 +4363,9 @@ def v3_d12(c, kk, salt, slot, variant):
 # D15 moving-bridges -- moving stones over pits; spike-family.
 # Mover travel is set so the swept extent exactly spans the pit:
 # flanks touch the swept ends (gap 0) and span the sweep y-range.
+# v1.0.7 variety redesign (lane B2): S5 was a flat mover identical
+# to S1 except for down-teeth; it is now a raised 600 corridor
+# mover, and its door moves. S1-S4 unchanged.
 # ---------------------------------------------------------------------------
 
 def v3_d15(c, kk, salt, slot, variant):
@@ -4394,12 +4399,6 @@ def v3_d15(c, kk, salt, slot, variant):
         plats = [_vm(c, 0, 520, mx),
                  _vmov(mx, 520, 160, 0, dy, mp),
                  _vm(c, mx + 160, 520, 1280 - (mx + 160))]
-        # G7: beam 420 -> 380. The 50px entry strip sits under beam
-        # bottom 436; the ceiling-clipped jump rises only 45px and
-        # spans ~53px vs 65px needed (P5: zero clears, zero lattice
-        # clears). Beam bottom 396 clears the full-jump head peak
-        # (520-39-57=424), so the strip is jumped unclipped; the
-        # strip width and the vertical-bob mover are untouched.
         plats += _vwalls(c, [300, 380])
         hazards = [_vt(150, 520, 50), _vt(900, 520, 50)]
         spawn, door = (90, 520), (1190, 520)
@@ -4414,32 +4413,19 @@ def v3_d15(c, kk, salt, slot, variant):
                  _vm(c, 1000, 600, 80),
                  _vm(c, 1080, 560, 200)]
         plats += _vwalls(c, [340, 440])
-        # Round 4: the rework table's 490 is geometrically impossible
-        # (the strip would sit in the [480,528] landing zone of the
-        # only edges onto the [480,mx] ground piece -> UNREACHABLE).
-        # 530 is the leftmost reachable position (2px past the zone),
-        # still moving the strip left, away from the mover at mx, as
-        # the table intended (R3 gate §10.4: V1 died clipping the
-        # strip's far edge with the mover just past it).
-        # G5 REDESIGN (D02S2-class): V3's strip ended 10px before
-        # the 600 step (window -7.3px, forced combined jump). V3's
-        # strip is now w32 at x968 (ends exactly at the step edge):
-        # intersection = 71.98 - 19.28 - 32 = 20.70px >= 15. V1/V2
-        # keep their 90px/50px landings (separate jumps, unchanged).
         hazards = [_vt(530, 640, 50),
                    _vt(_vo(variant, [mx + 260, mx + 260, 968]), 640,
                       _vo(variant, [50, 50, 32]))]
         spawn, door = (90, 560), (1190, 560)
-    else:  # slot 5: corridor-mover
-        mx = _vo(variant, [480, 520, 560])
+    else:  # slot 5: corridor-mover (raised 600 floor line)
         mp = _vo(variant, [2.8, 3.0, 3.2])
-        plats = [_v3_ground(c, 0, mx),
-                 _vmov(mx, 640, 120, 120, 0, mp),
-                 _v3_ground(c, mx + 240, 1280)]
+        plats = [_vm(c, 0, 600, 320),
+                 _vmov(320, 600, 120, 120, 0, mp),
+                 _vm(c, 560, 600, 720)]
         plats += _vwalls(c, [300, 420])
-        hazards = [_vt(200, 640, 50), _vt(1000, 640, 50),
+        hazards = [_vt(200, 600, 50), _vt(1000, 600, 50),
                    _vtd(300, 436, 60), _vtd(900, 436, 60)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (70, 600), (1120, 600)
     return plats, hazards, spawn, door, skel
 
 
@@ -4451,6 +4437,7 @@ def v3_d15(c, kk, salt, slot, variant):
 
 def v3_d17(c, kk, salt, slot, variant):
     skel = PILOT_SKELETONS[17][slot]
+    _GKEY[0:3] = [17, slot, variant]
     plats, hazards = [], []
     # Part B: teeth at JUMP HEIGHT over RAISED ground in every level.
     # _pb_teeth_beam(T) puts the beam bottom 4px above the jump head
@@ -4476,7 +4463,7 @@ def v3_d17(c, kk, salt, slot, variant):
         plats += _vwalls(c, [489, 449])
         hazards = [_vtd(220, 505, 60),
                    _vtd(520, 465, 60), _vtd(600, 465, 60)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (70, 640), (1120, 640)
     elif slot == 2:  # valley masses (clusters: left 560, right 560, rise)
         plats = [_vm(c, 0, 560, 360),
                  _vm(c, 360, 600, 80), _vm(c, 440, 640, 80),
@@ -4496,6 +4483,7 @@ def v3_d17(c, kk, salt, slot, variant):
                    _vtd(x0 + 470, 417, 30), _vtd(x0 + 505, 417, 30),
                    _vtd(x0 + 560, 449, 60),
                    _vt(1080, 640, 40)]
+        door = (1210, 640)
     elif slot == 4:  # terraces (clusters: 560, 520 terraces)
         plats, spawn, door, bx = _r_terraces(c, variant)
         plats += _vwalls(c, [449, 409])
@@ -4503,6 +4491,7 @@ def v3_d17(c, kk, salt, slot, variant):
                    _vtd(bx + 400, 465, 40),
                    _vtd(bx + 540, 425, 60), _vtd(bx + 600, 425, 60),
                    _vt(bx + 760, 600, 40)]
+        door = (1100, 640)
     else:  # slot 5: step-plateau 520 (clusters: step2, plateau,
         # down-step1). NO T=600 cluster: a 600-cluster's beam (489)
         # blocks every edge over the 520 plateau (Blocker range
@@ -4690,30 +4679,33 @@ def _v3_tower(c, kk, salt, cfg, dashed):
 
 def v3_d28(c, kk, salt, slot, variant):
     skel = PILOT_SKELETONS[28][slot]
+    # v107: tower params amplified per slot (was +/-10-20px, so all
+    # five towers read as one shape): standard / narrow-T / tall /
+    # low-corridor / mirror.
     if slot == 1:
         cfg = {"T": [_vo(variant, [170, 180, 190])],
                "S": [_vo(variant, [90, 95, 90])],
                "E1": [_vo(variant, [780, 820, 860])],
-               "G": [_vo(variant, [50, 60, 70])],
-               "padw": [_vo(variant, [150, 170, 190])]}
-    elif slot == 2:
-        cfg = {"T": [_vo(variant, [180, 190, 170])],
-               "S": [_vo(variant, [95, 90, 95])],
-               "E1": [_vo(variant, [820, 860, 780])],
                "G": [_vo(variant, [60, 70, 50])],
                "padw": [_vo(variant, [170, 190, 150])]}
+    elif slot == 2:
+        cfg = {"T": [_vo(variant, [200, 210, 190])],
+               "S": [_vo(variant, [110, 115, 110])],
+               "E1": [_vo(variant, [600, 640, 620])],
+               "G": [_vo(variant, [50, 60, 55])],
+               "padw": [_vo(variant, [150, 170, 160])]}
     elif slot == 3:
-        cfg = {"T": [_vo(variant, [190, 170, 180])],
-               "S": [_vo(variant, [90, 95, 90])],
-               "E1": [_vo(variant, [860, 780, 820])],
-               "G": [_vo(variant, [70, 50, 60])],
-               "padw": [_vo(variant, [190, 150, 170])]}
+        cfg = {"T": [_vo(variant, [140, 150, 145])],
+               "S": [_vo(variant, [120, 125, 120])],
+               "E1": [_vo(variant, [860, 880, 840])],
+               "G": [_vo(variant, [70, 75, 65])],
+               "padw": [_vo(variant, [190, 200, 180])]}
     elif slot == 4:
-        cfg = {"T": [_vo(variant, [175, 185, 195])],
-               "S": [_vo(variant, [90, 90, 95])],
-               "E1": [_vo(variant, [800, 840, 760])],
-               "G": [_vo(variant, [55, 65, 60])],
-               "padw": [_vo(variant, [160, 180, 170])]}
+        cfg = {"T": [_vo(variant, [260, 270, 265])],
+               "S": [_vo(variant, [70, 75, 70])],
+               "E1": [_vo(variant, [820, 840, 800])],
+               "G": [_vo(variant, [55, 60, 50])],
+               "padw": [_vo(variant, [160, 170, 150])]}
     else:
         cfg = {"T": [_vo(variant, [185, 175, 195])],
                "S": [_vo(variant, [95, 90, 90])],
@@ -4723,6 +4715,22 @@ def v3_d28(c, kk, salt, slot, variant):
     plats, tops, E1, E2, PR, sx, dx = _v3_tower(
         c, kk, salt, cfg, dashed=False)
     mirror = cfg.get("mirror", False)
+    if slot == 2:  # T-floors: stem column under floor1's left end
+        # (D32-proven shape: the column crosses floor3; the
+        # autopilot tolerates it in this tower family).
+        plats.append(plat(96, tops[0] + 20, 96,
+                          c.floor_y - (tops[0] + 20), "solid"))
+    elif slot == 3:  # side-shaft: two flank columns, channel 144-240
+        plats += [plat(96, tops[0] + 20, 48,
+                       c.floor_y - (tops[0] + 20), "solid"),
+                  plat(240, tops[0] + 20, 48,
+                       c.floor_y - (tops[0] + 20), "solid")]
+    elif slot == 4:  # corridor floors: side walls enclose the tower;
+        # spawn/door move inside the corridor (door 1130: column at
+        # PR+5=1040 ends 1066, door rect starts 1112 -> 46px).
+        plats += [plat(48, tops[0], 48, c.floor_y - tops[0], "solid"),
+                  plat(1184, tops[0], 48, c.floor_y - tops[0], "solid")]
+        sx, dx = 120, 1130
     if mirror:
         hazards = [_vt(882, tops[0], 35), _vt(965, tops[0], 35),
                    _vcol(600, 36, 26, top=tops[0]),
@@ -4733,10 +4741,12 @@ def v3_d28(c, kk, salt, slot, variant):
                    _vcol(166, 36, 26)]
     elif slot == 2:
         hazards = [_vt(300, tops[0], 50, trigger_x=240, delay=0.3),
-                   _vcol(620, 36, 26, top=tops[2]),
+                   _vcol(480, 36, 26, top=tops[2]),  # v107: was 620,
+                   # off the narrowed floor3 [48,600]
                    _vt(E2 + 60, tops[3], 48),
                    _vt(300, 640, 35), _vt(383, 640, 35),
-                   _vt(700, 640, 50)]
+                   _vt(850, 640, 50)]  # v107: was 700, in pad4's
+                   # landing zone [650,800] (checker rejects the edge)
     elif slot == 3:
         hazards = [_vt(240, tops[0], 40), _vt(328, tops[0], 40),
                    _vt(520, tops[0], 50),
@@ -4760,42 +4770,41 @@ def v3_d28(c, kk, salt, slot, variant):
     return plats, hazards, (sx, tops[0]), (dx, 640), skel
 
 
+# ---------------------------------------------------------------------------
+# D39 dashed-towers -- v1.0.7 variety redesign (lane B4).
+# Mechanic FROZEN (Part B): dashed towers; period/on per ramp
+# [3.2,3.0,3.0,2.8,2.8] / [2.2,2.0,2.0,1.8,1.8] (inside _v3_tower
+# dashed mode). Baseline cfg varied only ~10-25px per slot (T 170-195,
+# E1 780-860); each slot now gets a strongly different tower (T 160-220,
+# S 85-105, E1 780-900, mirror only S5) so the floor heights/widths
+# are visibly different. Floor 1 stays SOLID in _v3_tower dashed mode
+# (spawn safety: a blinking spawn floor is not survivable); floors 2-4
+# are dashed in every slot, which is the D39 identity vs D32's
+# alternating floors. Hazard x-positions per slot are unchanged.
+# ---------------------------------------------------------------------------
+
 def v3_d39(c, kk, salt, slot, variant):
-    # Lane C: ground popup at 600 (top 640) in every slot, near a
-    # column (|600-column_centre| <= 113): (column, spike_popup)
-    # survives; declared primary {dashed, column_floor, spike_popup},
-    # demo pair_platform (dashed on route + surviving primary pair).
-    skel = PILOT_SKELETONS[39][slot]
-    if slot == 1:
-        cfg = {"T": [_vo(variant, [170, 180, 190])],
-               "S": [_vo(variant, [90, 95, 90])],
-               "E1": [_vo(variant, [780, 820, 860])],
-               "G": [_vo(variant, [50, 60, 70])],
-               "padw": [_vo(variant, [150, 170, 190])]}
-    elif slot == 2:
-        cfg = {"T": [_vo(variant, [175, 185, 195])],
-               "S": [_vo(variant, [95, 90, 95])],
-               "E1": [_vo(variant, [800, 840, 780])],
-               "G": [_vo(variant, [55, 65, 50])],
-               "padw": [_vo(variant, [160, 180, 150])]}
-    elif slot == 3:
-        cfg = {"T": [_vo(variant, [180, 170, 190])],
-               "S": [_vo(variant, [90, 95, 90])],
-               "E1": [_vo(variant, [860, 780, 820])],
-               "G": [_vo(variant, [70, 50, 60])],
-               "padw": [_vo(variant, [190, 150, 170])]}
-    elif slot == 4:
-        cfg = {"T": [_vo(variant, [175, 185, 195])],
-               "S": [_vo(variant, [90, 90, 95])],
-               "E1": [_vo(variant, [800, 820, 760])],
-               "G": [_vo(variant, [55, 65, 60])],
-               "padw": [_vo(variant, [160, 180, 170])]}
-    else:
-        cfg = {"T": [_vo(variant, [185, 180, 195])],
-               "S": [_vo(variant, [95, 90, 90])],
-               "E1": [_vo(variant, [840, 800, 780])],
-               "G": [_vo(variant, [65, 55, 60])],
-               "padw": [_vo(variant, [180, 160, 150])], "mirror": True}
+    skel = V3_SKELETONS[39][slot]
+    _GKEY[0:3] = [39, slot, variant]
+    cfgs = {
+        1: {"T": [160], "S": [90], "E1": [820], "G": [60],
+            "padw": [150]},
+        2: {"T": [200], "S": [105], "E1": [860], "G": [50],
+            "padw": [120]},
+        3: {"T": [180], "S": [95], "E1": [780], "G": [70],
+            "padw": [190]},
+        4: {"T": [220], "S": [85], "E1": [860], "G": [60],
+            "padw": [170]},
+        5: {"T": [170], "S": [100], "E1": [840], "G": [65],  # F2: G 65
+            # (was 60) -- the repair flank sits at pad-right-edge+8;
+            # E2=900 pinned the mirrored drop gap at 4px, where the
+            # nightmare autopilot stalls with no-progress on all 4
+            # strategies (1px knife-edge: gap 5px passes, 4px fails).
+            # E2=905 restores the shipped 9px gap (flank 383, pads
+            # 145w) and the mid-strut returns as floor 2's left flank.
+            "padw": [180], "mirror": True},
+    }
+    cfg = cfgs[slot]
     plats, tops, E1, E2, PR, sx, dx = _v3_tower(
         c, kk, salt, cfg, dashed=True)
     mirror = cfg.get("mirror", False)
@@ -4804,8 +4813,6 @@ def v3_d39(c, kk, salt, slot, variant):
                    _vcol(600, 36, 26, top=tops[0]),
                    _vt(682, 640, 35), _vt(765, 640, 35),
                    _vt(500, 640, 50),
-                   # Lane C: popup on the TOP floor at 500 (tops[0]),
-                   # 100 px before the column at 660 (|673-517|=156).
                    _h_popup(500, tops[0], 35, 3.0, 0.0, 1.4)]
     elif slot == 2:
         hazards = [_vt(_vo(variant, [240, 280, 320]), tops[0], 50),
@@ -4819,14 +4826,6 @@ def v3_d39(c, kk, salt, slot, variant):
                    _vt(520, tops[0], 50),
                    _vcol(500, 36, 26),
                    _vt(300, 640, 35), _vt(383, 640, 35),
-                   # Lane C: S3 has NO top-floor column (its only
-                   # column is on the ground, never walked), so add
-                   # one at 700 (tops[0]). NO popup here: a popup
-                   # anywhere in the free [570,780] zone lands the
-                   # hero 40-45 px before the column and the
-                   # autopilot runs into it (died at feet 693.5,
-                   # twice, popup at 620 and 615). The door demo
-                   # still passes via S1/S2/S4/S5 (simul 4/5).
                    _vcol(700, 36, 26, top=tops[0])]
     elif slot == 4:
         hazards = [_vt(300, tops[0], 35), _vt(383, tops[0], 35),
@@ -4842,9 +4841,12 @@ def v3_d39(c, kk, salt, slot, variant):
                    _vt(240, 640, 35), _vt(323, 640, 35),
                    _vcol(700, 36, 26),
                    _h_popup(500, tops[0], 35, 3.0, 0.7, 1.4)]
-    return plats, hazards, (sx, tops[0]), (dx, 640), skel
-
-
+    # S4 door stays 1190 (not 1110): the door at 1110 blocks repair
+    # from adding the dashed floors' right shaft-flank ([1058,1106]
+    # overlaps the door safe zone), leaving F2/F4 unsupported and
+    # core-middle short (144 < 160). Doors still move: 1190/1150/90.
+    door_x = 90 if mirror else {1: 1190, 2: 1150, 3: 1190, 4: 1190}[slot]
+    return plats, hazards, (sx, tops[0]), (door_x, 640), skel
 # ---------------------------------------------------------------------------
 # D29 reversed-runs -- door LEFT, spawn RIGHT. Simple isolated
 # obstacles only: strips, gaps (w <= 76), jumpable columns (h <= 44,
@@ -4856,12 +4858,13 @@ def v3_d29(c, kk, salt, slot, variant):
     skel = PILOT_SKELETONS[29][slot]
     _BEAMS = {1: [(304, 416), (320, 432), (336, 448)],
               2: [(304, 432), (320, 448), (336, 464)],
-              3: [(352, 416), (368, 432), (384, 448)],
+              3: [(300, 340), (320, 360), (300, 360)],
               4: [(352, 432), (368, 448), (384, 464)],
-              5: [(400, 416), (416, 448), (400, 464)]}
+              5: [(304, 344), (324, 364), (304, 364)]}
     beams = _BEAMS[slot][variant - 1]
     sh = _vo(variant, [-40, 0, 40])
     lead = [160, 140, 140, 120, 120][slot - 1]
+    spawn, door = (1190, 640), (90, 640)  # v107: per-slot override
 
     def _trig(x, w=45):
         return _h_trig_left(x, 640, w, lead=lead, delay=0.3)
@@ -4870,27 +4873,52 @@ def v3_d29(c, kk, salt, slot, variant):
         plats = [_v3_ground(c)] + _vwalls(c, beams)
         hazards = [_trig(860), _trig(540), _trig(220),
                    _h_col(700, 640)]
-    elif slot == 2:  # reversed-gaps: 2 gaps + 2 triggered + 1 column
-        g1 = 280 + sh - 38
-        g2 = 920 + sh - 38
-        plats = [_v3_ground(c, 0, g1), _v3_ground(c, g1 + 76, g2),
-                 _v3_ground(c, g2 + 76, 1280)] + _vwalls(c, beams)
-        hazards = [_trig(700, 50), _trig(420, 50), _h_col(1060, 640)]
-    elif slot == 3:  # reversed-columns: 3 columns + 3 triggered
-        plats = [_v3_ground(c)] + _vwalls(c, beams)
-        hazards = [_trig(800), _h_col(700, 640), _trig(480),
-                   _h_col(380, 640), _trig(160), _h_col(250, 640)]
-    elif slot == 4:  # reversed-mixed: gap + 3 triggered + 1 column
-        g1 = 596 + sh - 36
-        plats = [_v3_ground(c, 0, g1), _v3_ground(c, g1 + 72, 1280)] \
-            + _vwalls(c, beams)
-        hazards = [_trig(960), _trig(760), _trig(220),
-                   _h_col(880, 640)]
-    else:  # slot 5: reversed-triggered: 4 triggered + 1 column
-        plats = [_v3_ground(c)] + _vwalls(c, beams)
-        hazards = [_trig(1000, 50), _trig(760, 40), _trig(520, 40),
-                   _trig(280, 50), _h_col(640, 640)]
-    return plats, hazards, (1190, 640), (90, 640), skel
+    elif slot == 2:  # reversed-valley (v107: was gaps on flat):
+        # 3 triggered + 1 column on the valley floor
+        plats, spawn, door = _r_valley_rev(c, variant)
+        hazards = [_h_trig_left(940, 560, 50, lead=lead, delay=0.3), _h_trig_left(700, 640, 50, lead=lead, delay=0.3),
+                   _h_trig_left(420, 640, 50, lead=lead, delay=0.3), _h_col(1060, 560)]
+    elif slot == 3:  # reversed-stair (v107: was columns on flat):
+        # v107 fix (autopilot d29: L142 died walking into the step
+        # trigs -- a triggered strip needs a flat same-level run-up
+        # with no step-up in the preceding ~100px; the 96-wide steps
+        # give none). All 3 trigs now sit on long flats: strip1 on
+        # the right ground, strips 2+3 on the 512 plateau (54px /
+        # 32px flat run-up after the step-up landing / strip jump);
+        # column moves to the left descending 544 step, jumped from
+        # a flat walk after a step-down. Ramp kept: 3 trigs, lead
+        # 140. All x0-relative so every variant seats. NOTE: V2/V3
+        # (x0 160/200) strip1 triggers at 1200/1240, past spawn
+        # 1190, so the strip never pops there -- harmless (walkable
+        # down strip, still passes); V1 ships and its trigger 1160
+        # is live.
+        plats, _s, _d, x0 = _r_stairs32(c, variant)
+        hazards = [_h_trig_left(x0 + 840, 640, 40, lead=lead, delay=0.3), _h_trig_left(x0 + 420, 512, 40, lead=lead, delay=0.3),
+                   _h_trig_left(x0 + 300, 512, 40, lead=lead, delay=0.3), _h_col(x0 + 200, 544)]
+    elif slot == 4:  # reversed-corridor (v107: was gap on flat):
+        # walkway [480,760] top 600 + 4 triggered + 1 column
+        plats = [_v3_ground(c, 0, 480), _vm(c, 480, 600, 280),
+                 _v3_ground(c, 760, 1280)] + _vwalls(c, beams)
+        hazards = [_h_trig_left(960, 640, 50, lead=lead, delay=0.3), _h_col(880, 640),
+                   _h_trig_left(700, 600, 40, lead=lead, delay=0.3), _h_trig_left(520, 600, 40, lead=lead, delay=0.3),
+                   _h_trig_left(220, 640, 40, lead=lead, delay=0.3)]
+        door = (110, 640)
+    else:  # slot 5: reversed-terrace, DESCENDING (v107 fix:
+        # autopilot d29: L144 died mid-jump through the strip
+        # straddling the 560/600 terrace edge -- a triggered strip
+        # must not sit on or just after a step-up. The hero now
+        # spawns HIGH (1190,520) and walks DOWN three wide terraces
+        # (520 -> 560 -> 600 -> 640 ground); every trig sits on a
+        # wide flat terrace top with >=100px flat run-up after its
+        # step-down landing. Ramp kept: 4 trigs, lead 120. Beam pair
+        # per slot (variant) as before.
+        plats = [_v3_ground(c), _vm(c, 1000, 520, 280),
+                 _vm(c, 760, 560, 240), _vm(c, 520, 600, 240)] + _vwalls(c, beams)
+        hazards = [_h_trig_left(1010, 520, 50, lead=lead, delay=0.3), _h_trig_left(800, 560, 50, lead=lead, delay=0.3),
+                   _h_trig_left(560, 600, 50, lead=lead, delay=0.3), _h_trig_left(200, 640, 50, lead=lead, delay=0.3),
+                   _h_col(400, 640)]
+        spawn, door = (1190, 520), (90, 640)
+    return plats, hazards, spawn, door, skel
 # ---------------------------------------------------------------------------
 # D31 drop-shafts -- two stacked floors + ground, one wide shaft
 # (340-440, no jump can clear). Shaft walls span ONLY the inter-floor
@@ -4930,6 +4958,18 @@ def v3_d31(c, kk, salt, slot, variant):
         T1, D, sx, sw = 160, 200, _vo(variant, [600, 640, 680]), 300
     T2 = T1 + D
     rx = sx + sw
+    # v107 per-slot shaft shapes (was one shape, sx/sw only):
+    _v107_d31_extra = []
+    if slot == 2:  # stepped bottom: two step masses under the shaft
+        _v107_d31_extra = [_vm(c, sx, 600, 120), _vm(c, sx + 120, 560, 120)]
+    elif slot == 3:  # side ledges: ledge mass at the shaft mouth
+        _v107_d31_extra = ["ledge"]
+    elif slot == 4:  # T-top: crossbar over the shaft mouth on posts
+        _v107_d31_extra = [plat(0, T1 - 60, 48, 60, "solid"),
+                           plat(rx, T1 - 60, 48, 60, "solid"),
+                           plat(0, T1 - 60, rx + 48, 16, "solid")]
+    elif slot == 5:  # mid-pillar: floor-rooted pillar in the shaft
+        _v107_d31_extra = [_vm(c, sx + sw // 2 - 24, T2, 48)]
     plats = [plat(0, T1, sx, 20, "solid"),
              plat(rx, T1, 1280 - rx, 20, "solid"),
              plat(0, T2, sx, 20, "solid"),
@@ -4937,6 +4977,13 @@ def v3_d31(c, kk, salt, slot, variant):
              _v3_ground(c),
              plat(sx - 96, T1, 96, D, "solid"),
              plat(rx, T1, 96, D, "solid")]
+    if _v107_d31_extra == ["ledge"]:
+        # floor2 left slab steps down at the shaft mouth: slab ends
+        # sx-80, ledge mass top T2+40 fills [sx-80, sx]
+        plats[2] = plat(0, T2, sx - 80, 20, "solid")
+        plats.append(_vm(c, sx - 80, T2 + 40, 80))
+    else:
+        plats += _v107_d31_extra
     y1 = T1 + 60
     wall_teeth = [_vts(sx, y1, 48, "right"),
                   _vts(rx - 10, y1, 48, "left")]
@@ -4983,19 +5030,25 @@ def v3_d31(c, kk, salt, slot, variant):
                    _vt(600, 640, 40), _vcol(850, 36, 26),
                    _h_pillar_trig(c, 1000, 150, 104, 700)] + wall_teeth
     else:
-        # Lane C2: ground column 920 + trig pillar 1060 (trigger
-        # 778, crossed on the ground walk just after the shaft
-        # landing). The 880 column's takeoff window [835,853] sat
-        # BEHIND the shaft-drop landing (~855) — the hero landed
-        # past the window and walked into the column. The 920
-        # column's window [875,893] is 20px past the landing.
-        # Ground column 500 + T1 popup 550 REMOVED.
+        # Lane C2 + v107: ground column 1010 + trig pillar 1100.
+        # The v107 mid-pillar changed the shaft fall: autopilot
+        # evidence (d31) shows 4 deaths at feet (944.5,610.0) --
+        # the hero now lands ~948, so Lane C2's 920 column (window
+        # [875,893], placed for the old ~855 landing) sits BEHIND
+        # the landing and the falling hero hits it. The 1010
+        # column's window [965,983] is ~20px past the new landing
+        # (same margin as Lane C2's fix). The pillar moves
+        # 1060->1100 so the column-jump landing (1058-1076) is flat
+        # ground before the pillar step; trigger follows the pillar
+        # (px-282). Ground column 500 + T1 popup 550 REMOVED.
         hazards = [_vt(200, T1, 35), _vt(283, T1, 35),
                    _vcol(450, 36, 26, top=T1),
                    _vt(300, T2, 50),
-                   _vt(200, 640, 50), _vcol(920, 36, 26),
-                   _h_pillar_trig(c, 1060, 150, 104, 700)] + wall_teeth
-    return plats, hazards, (90, T1), (1190, 640), skel
+                   _vt(200, 640, 50), _vcol(1010, 36, 26),
+                   _h_pillar_trig(c, 1100, 150, 104, 700)] + wall_teeth
+    # v107: door x moves (pillars end <= 1100, so 1170 keeps 52px)
+    door_x = {1: 1190, 2: 1170, 3: 1150, 4: 1170, 5: 1170}[slot]
+    return plats, hazards, (90, T1), (door_x, 640), skel
 
 
 # ---------------------------------------------------------------------------
@@ -5175,12 +5228,23 @@ def _h_swing_high(c, cx, cy, arc, period, r):
 #      probe sees a hazard, so a strip/teeth gap must start >=100px
 #      past the previous hazard cluster.
 
-def _pb_split_ground(plats, pit_x, pit_w, bridge_top=656):
+def _pb_split_ground(plats, pit_x, pit_w, bridge_top=640):
     """Split the top-640 ground slab containing [pit_x, pit_x+pit_w)
     into left slab + bridge + right slab. The bridge is a solid
-    [pit_x+20, pit_x+pit_w+20] at bridge_top (16 below the floor)
-    with a 20px entry gap and an overlapping exit. Returns the new
-    plats list (the ground slab is replaced in place)."""
+    [pit_x, pit_x+pit_w+40] at bridge_top (flush with the floor),
+    meeting the left slab (no entry gap) with an overlapping exit.
+    B1F (patch_b1f5.py): the bridge used to start at pit_x+20, so
+    the hero had to JUMP the pit to reach it -- and the strip + pit
+    + saw chain landed him inside the swing saw's swept zone, with
+    no safe departure point (autopilot dep unsafe, probe F1 fail).
+    Meeting the ground lets him walk on with a long safe run before
+    the disc. B1F (patch_b1f6.py): bridge_top 656 -> 640 (flush):
+    the solver's candidates only reach takeoffs on ONE flat surface,
+    and a 16px drop stops them at the ground's edge (tks=0), so the
+    solver never engages; flush, it does. This also restores the
+    filed disc grazing (disc y638 = 2px above the surface, as
+    filed). Returns the new plats list (the ground slab is replaced
+    in place)."""
     out = []
     done = False
     for p in plats:
@@ -5189,7 +5253,7 @@ def _pb_split_ground(plats, pit_x, pit_w, bridge_top=656):
                 and float(p["x"]) + float(p["w"]) >= pit_x + pit_w):
             x0, w = float(p["x"]), float(p["w"])
             out.append(plat(x0, 640, pit_x - x0, 80, "solid"))
-            out.append(plat(pit_x + 20, bridge_top, pit_w + 20, 720 - bridge_top, "solid"))
+            out.append(plat(pit_x, bridge_top, pit_w + 40, 720 - bridge_top, "solid"))
             out.append(plat(pit_x + pit_w, 640, x0 + w - (pit_x + pit_w), 80, "solid"))
             done = True
         else:
@@ -5237,6 +5301,9 @@ def _pb_pier(c, px, kind1, kind2, beams=(300, 420), pier_w=240,
     (plats, saw). The saw's landing zone [pier_x, pier_x+48] is
     clear of the disc and the jump-over window fits the pier."""
     def _stone(kind, x, w):
+        if kind == "solid":
+            # B1F: solid 20px slab (same rect as B1's timed stone).
+            return plat(x, 640, w, 20, "solid")
         if kind == "dashed":
             return _vdash(x, 640, w, period, phase, on)
         if kind == "moving":
@@ -5437,32 +5504,46 @@ def v3_d03(c, kk, salt, slot, variant):
         hazards = [_vt(_vo(variant, [220, 260, 300]), 640, 40),
                    _h_saw(460, 640, r), _h_saw(740, 640, r),
                    _h_saw(1020, 640, r)]
+        spawn, door = (80, 640), (1150, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     elif slot == 2:  # valley-saws
         plats, spawn, door = _r_valley(c, variant)
         # G7: saw2 r26 -> r24 (P5 0.1px scan: zero clears, crossing
         # window empty by 0.25px).
         hazards = [_h_saw(580, 640, 22), _h_saw(720, 640, 24),
                    _vt(_vo(variant, [1010, 1050, 1090]), 560, 40)]
+        spawn, door = (100, 560), (1170, 560)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     elif slot == 3:  # stair-saws (redesigned tread strips)
         plats, spawn, door, x0 = _r_stairs32(c, variant)
         _rects, strips = _vstairs_teeth(c, x0, n=3)
         hazards = strips + [_h_saw(x0 + 470, 512, 24),
                             _vt(1080, 640, 40)]
-    elif slot == 4:  # corridor-saws
-        plats, spawn, door = _r_flat(c, beams=(300, 420))
-        r = _vo(variant, [22, 24, 26])
-        hazards = _h_pair(_vo(variant, [260, 300, 340]), 640) + [_h_saw(620, 640, r),
-                                       _h_saw(900, 640, r)]
-    else:  # slot 5: terrace-saws
+        spawn, door = (80, 640), (1200, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
+    elif slot == 4:  # corridor-saws (v1.0.7: REAL corridor -- a
+        # raised 560 plateau reached by 40px steps, under the 300/420
+        # beams; the old slot was flat ground + beams, i.e. the same
+        # floor profile as S1. Saws on the ground, on the plateau,
+        # and on the ground after it.
+        plats = [_v3_ground(c, 0, 480),
+                 _vm(c, 480, 600, 80), _vm(c, 560, 560, 80),
+                 _vm(c, 640, 560, 280),
+                 _vm(c, 920, 600, 80),
+                 _v3_ground(c, 1000, 1280)]
+        plats += _vwalls(c, [300, 420])
+        hazards = [_h_saw(300, 640, 22), _h_saw(740, 560, 22),
+                   _h_saw(1100, 640, 22)]
+        spawn, door = (70, 640), (1190, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
+    else:  # slot 5: terrace-saws -- SPARE only (D03 ships 4 slots;
+        # kept valid so the generator's slot sweep still passes)
         plats, spawn, door, bx = _r_terraces(c, variant)
-        # G7: saw1 r26 -> r24. P5 0.1px scan: clears only at
-        # takeoffs 629.5-640, past the disc centre and unreachable
-        # (hero dies running to them); takeoffs before the disc
-        # entry have zero clears. r24 widens the window.
         hazards = [_h_saw(bx + 360, 560, 24),
                    _h_saw(bx + 600, 520, 26),
                    _vt(bx + 810, 600, 40)]
-    return plats + [_fp(c)], hazards, spawn, door, skel
+        spawn, door = (80, 640), (1200, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
 
 
 # ---------------------------------------------------------------------------
@@ -5479,30 +5560,47 @@ def v3_d04(c, kk, salt, slot, variant):
                    _h_popup(560, 640, 45, pp[0], 0.7, pp[1]),
                    _h_popup(820, 640, 45, pp[0], 1.4, pp[1]),
                    _vt(1050, 640, 40)]
+        spawn, door = (80, 640), (1160, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     elif slot == 2:  # valley-popups
         plats, spawn, door = _r_valley(c, variant)
         hazards = [_h_popup(540, 640, 45, pp[0], 0.0, pp[1]),
                    _h_popup(700, 640, 45, pp[0], 0.7, pp[1]),
                    _vt(_vo(variant, [1050, 1070, 1090]), 560, 40)]
+        spawn, door = (100, 560), (1170, 560)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     elif slot == 3:  # stair-popups (redesigned treads, popup strips)
         plats, spawn, door, x0 = _r_stairs32(c, variant)
         steps, _, _ = _vstairs_up(c, x0, 640, 3, tread=96, rise=32)
         hazards = [_h_popup(x0 + 56 + 96 * i, 640 - 32 * (i + 1), 40,
                             pp[0], 0.7 * i, pp[1]) for i in range(3)]
         hazards += [_vt(x0 + 470, 512, 40), _vt(1080, 640, 40)]
-    elif slot == 4:  # corridor-popups
-        plats, spawn, door = _r_flat(c, beams=(300, 420))
-        hazards = [_h_popup(280, 640, 45, pp[0], 0.0, pp[1]),
-                   _h_popup(540, 640, 45, pp[0], 0.7, pp[1]),
-                   _h_popup(800, 640, 45, pp[0], 1.4, pp[1]),
-                   _vtd(450, 496, 60), _vtd(950, 496, 60)]
+        spawn, door = (80, 640), (1200, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
+    elif slot == 4:  # corridor-popups (v1.0.7: REAL corridor --
+        # a raised 576 plateau under the 320/440 beams; popups on
+        # the ground, on the plateau, and on the ground after it;
+        # down-teeth hang from the lower beam bottom (456).
+        plats = [_v3_ground(c, 0, 480),
+                 _vm(c, 480, 608, 80), _vm(c, 560, 576, 80),
+                 _vm(c, 640, 576, 240),
+                 _vm(c, 880, 608, 80),
+                 _v3_ground(c, 960, 1280)]
+        plats += _vwalls(c, [320, 440])
+        hazards = [_h_popup(300, 640, 45, pp[0], 0.0, pp[1]),
+                   _h_popup(700, 576, 40, pp[0], 0.7, pp[1]),
+                   _h_popup(1020, 640, 45, pp[0], 1.4, pp[1]),
+                   _vtd(500, 456, 60), _vtd(950, 456, 60)]
+        spawn, door = (70, 640), (1190, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     else:  # slot 5: terrace-popups
         plats, spawn, door, bx = _r_terraces(c, variant)
         hazards = [_h_popup(bx + 60, 600, 40, pp[0], 0.0, pp[1]),
                    _h_popup(bx + 360, 560, 40, pp[0], 0.7, pp[1]),
                    _h_popup(bx + 600, 520, 40, pp[0], 1.4, pp[1]),
                    _vt(bx + 810, 600, 40)]
-    return plats + [_fp(c)], hazards, spawn, door, skel
+        spawn, door = (80, 640), (1210, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
 
 
 # ---------------------------------------------------------------------------
@@ -5519,29 +5617,47 @@ def v3_d05(c, kk, salt, slot, variant):
         hazards = [_h_trig(320, 640, 45, lead, delay),
                    _h_trig(620, 640, 45, lead, delay),
                    _h_trig(920, 640, 45, lead, delay)]
+        spawn, door = (80, 640), (1160, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     elif slot == 2:  # valley-triggered
         plats, spawn, door = _r_valley(c, variant)
         hazards = [_h_trig(540, 640, 45, lead, delay),
                    _h_trig(700, 640, 45, lead, delay),
                    _vt(_vo(variant, [1050, 1070, 1090]), 560, 40)]
+        spawn, door = (100, 560), (1170, 560)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     elif slot == 3:  # stair-triggered (redesigned treads)
         plats, spawn, door, x0 = _r_stairs32(c, variant)
         hazards = [_h_trig(x0 + 56 + 96 * i, 640 - 32 * (i + 1), 40,
                            lead, delay) for i in range(3)]
         hazards += [_vt(x0 + 470, 512, 40), _vt(1080, 640, 40)]
-    elif slot == 4:  # corridor-triggered
-        plats, spawn, door = _r_flat(c, beams=(300, 420))
+        spawn, door = (80, 640), (1200, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
+    elif slot == 4:  # corridor-triggered (v1.0.7: REAL corridor --
+        # a 544 plateau reached by three 32px steps under the
+        # 300/400 beams; triggered strips on the ground, on the
+        # plateau, and on the ground after it.
+        plats = [_v3_ground(c, 0, 400),
+                 _vm(c, 400, 608, 80), _vm(c, 480, 576, 80),
+                 _vm(c, 560, 544, 80),
+                 _vm(c, 640, 544, 200),
+                 _vm(c, 840, 576, 80), _vm(c, 920, 608, 80),
+                 _v3_ground(c, 1000, 1280)]
+        plats += _vwalls(c, [300, 400])
         hazards = [_h_trig(300, 640, 45, lead, delay),
-                   _h_trig(600, 640, 45, lead, delay),
-                   _h_trig(900, 640, 45, lead, delay),
-                   _vtd(450, 496, 60), _vtd(950, 496, 60)]
+                   _h_trig(700, 544, 40, lead, delay),
+                   _h_trig(1020, 640, 45, lead, delay),
+                   _vtd(500, 416, 60)]
+        spawn, door = (70, 640), (1190, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     else:  # slot 5: terrace-triggered
         plats, spawn, door, bx = _r_terraces(c, variant)
         hazards = [_h_trig(bx + 60, 600, 40, lead, delay),
                    _h_trig(bx + 360, 560, 40, lead, delay),
                    _h_trig(bx + 600, 520, 40, lead, delay),
                    _vt(bx + 810, 600, 40)]
-    return plats + [_fp(c)], hazards, spawn, door, skel
+        spawn, door = (80, 640), (1210, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
 
 
 # ---------------------------------------------------------------------------
@@ -5560,27 +5676,49 @@ def v3_d06(c, kk, salt, slot, variant):
         hazards = [_vt(280, 640, 40),
                    _h_pillar_trig(c, 580, py, ph, speed),
                    _vt(900, 640, 45)]
+        spawn, door = (80, 640), (1160, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     elif slot == 2:  # valley-triggered-pillar
         plats, spawn, door = _r_valley(c, variant)
         hazards = [_vt(540, 640, 40),
                    _h_pillar_trig(c, 640, py, ph, speed),
                    _vt(_vo(variant, [1050, 1070, 1090]), 560, 40)]
+        spawn, door = (100, 560), (1170, 560)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     elif slot == 3:  # stair-triggered-pillar (pillar on post-stair ground)
         plats, spawn, door, x0 = _r_stairs32(c, variant)
         _rects, strips = _vstairs_teeth(c, x0, n=3)
         hazards = strips + [_vt(x0 + 470, 512, 40),
                             _h_pillar_trig(c, 1080, py, ph, speed)]
-    elif slot == 4:  # corridor-triggered-pillar
-        plats, spawn, door = _r_flat(c, beams=(300, 420))
-        hazards = [_vt(300, 640, 40),
-                   _h_pillar_trig(c, 640, py, ph, speed),
-                   _vt(950, 640, 45), _vtd(450, 496, 60)]
+        spawn, door = (80, 640), (1200, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
+    elif slot == 4:  # corridor-triggered-pillar (v1.0.7: REAL
+        # corridor -- a raised 560 plateau under the 320/420 beams;
+        # the triggered pillar lands on the ground AFTER the
+        # plateau (never buried in it); strip + down-teeth before.
+        plats = [_v3_ground(c, 0, 400),
+                 _vm(c, 400, 600, 80), _vm(c, 480, 560, 80),
+                 _vm(c, 560, 560, 320),
+                 _vm(c, 880, 600, 80),
+                 _v3_ground(c, 960, 1280)]
+        plats += _vwalls(c, [320, 420])
+        hazards = [_vt(280, 640, 40),
+                   # F4 (lane F4, 2026-11-22): pillar 1080 ->
+                   # 1000. L027/L028 shared the pillar
+                   # (1080,130,40,104) incl. trigger 791 /
+                   # speed 700. Lands on the 640 ground
+                   # [960,1280]; trigger 711, door-safe.
+                   _h_pillar_trig(c, 1000, py, ph, speed),
+                   _vtd(500, 436, 60)]
+        spawn, door = (70, 640), (1190, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     else:  # slot 5: gap-triggered-pillar
         plats, spawn, door = _r_gap2(c, variant, "dashed", "falling")
         hazards = [_vt(800, 640, 40),
                    _h_pillar_trig(c, 900, py, ph, speed),
                    _vt(1080, 640, 40)]
-    return plats + [_fp(c)], hazards, spawn, door, skel
+        spawn, door = (80, 640), (1210, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
 
 
 # ---------------------------------------------------------------------------
@@ -5600,28 +5738,44 @@ def v3_d07(c, kk, salt, slot, variant):
         hazards = [_vt(300, 640, 40),
                    _h_pillar_per(580, py, ph, period, phase, speed),
                    _vt(900, 640, 45)]
+        spawn, door = (80, 640), (1160, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     elif slot == 2:  # valley-periodic-pillar
         plats, spawn, door = _r_valley(c, variant)
         hazards = [_vt(540, 640, 40),
                    _h_pillar_per(640, py, ph, period, phase, speed),
                    _vt(_vo(variant, [1050, 1070, 1090]), 560, 40)]
+        spawn, door = (100, 560), (1170, 560)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     elif slot == 3:  # stair-periodic-pillar
         plats, spawn, door, x0 = _r_stairs32(c, variant)
         _rects, strips = _vstairs_teeth(c, x0, n=3)
         hazards = strips + [_vt(x0 + 470, 512, 40),
                             _h_pillar_per(1080, py, ph, period, phase,
                                           speed)]
-    elif slot == 4:  # corridor-periodic-pillar
-        plats, spawn, door = _r_flat(c, beams=(300, 420))
+        spawn, door = (80, 640), (1200, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
+    elif slot == 4:  # corridor-periodic-pillar (v1.0.7: REAL
+        # corridor -- a raised 576 plateau under the 300/440 beams;
+        # the periodic pillar drops on the ground after the plateau.
+        plats = [_v3_ground(c, 0, 440),
+                 _vm(c, 440, 608, 80), _vm(c, 520, 576, 80),
+                 _vm(c, 600, 576, 240),
+                 _vm(c, 840, 608, 80),
+                 _v3_ground(c, 920, 1280)]
+        plats += _vwalls(c, [300, 440])
         hazards = [_vt(300, 640, 40),
-                   _h_pillar_per(640, py, ph, period, phase, speed),
-                   _vt(950, 640, 45), _vtd(450, 496, 60)]
+                   _h_pillar_per(1000, py, ph, period, phase, speed),
+                   _vtd(500, 456, 60)]
+        spawn, door = (70, 640), (1190, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     else:  # slot 5: gap-periodic-pillar
         plats, spawn, door = _r_gap2(c, variant, "falling", "dashed")
         hazards = [_vt(800, 640, 40),
                    _h_pillar_per(900, py, ph, period, phase, speed),
                    _vt(1080, 640, 40)]
-    return plats + [_fp(c)], hazards, spawn, door, skel
+        spawn, door = (80, 640), (1210, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
 
 
 # ---------------------------------------------------------------------------
@@ -5672,111 +5826,292 @@ def _laneC_walls(c, beam_low=406):
 def v3_d08(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[8][slot]
     _GKEY[0:3] = [8, slot, variant]
-    # Lane C: swing saw pivot (gx+40, 416), disc (gx+40, 638), r18,
-    # arc 10 deg, T2.0, over an 80 px gap [gx, gx+80]; stone under the
-    # gap. Pair strip at [gx-140, gx-100] (centre gx-120; saw anchor
-    # gx+58; |diff| = 178 <= 300). Walk-out strip 1000 (slots 2-3) /
-    # 860 (slots 4-5). Declared primary {saw_swing, spike_up}.
-    gx = [600, 640, 560, 680, 520][slot - 1]
-    plats = [floor_seg(c, 0, gx, top=640), floor_seg(c, gx + 80, 1280, top=640),
-             plat(gx + 20, 656, 60, 64, "solid")] + _laneC_walls(c)
-    hazards = [saw_swing(gx + 40, 638, gx + 40, 416, 10, 2.0, 18),
-               spikes_up(gx - 140, 40, top=640)]
-    if slot in (2, 3):
-        hazards.append(spikes_up(1000, 40, top=640))
-    elif slot in (4, 5):
-        hazards.append(spikes_up(860, 40, top=640))
-    return plats, hazards, (70, 640), (1190, 640), skel
+    # v1.0.7 lane B1F: Lane C swing saw RESTORED on the B1 bridge
+    # shapes (the B1 static saw is gone). Swing saw per the filed
+    # spike-d08 geometry, seated on the B1 pit: gx = pit_x + 40,
+    # disc (gx+40, 638), pivot (gx+40, 416) INSIDE the lower beam
+    # (406), r18, arc 10 deg, T2.0, over the pit with the bridge
+    # (stone) under it. Ramp kept: saw r [18,20,20,22,22];
+    # pit_w [160,160,160,140,140]. Lower beam 406 in every slot so
+    # the pivot sits inside a grounded beam (else _add_gantries
+    # would try a local beam for the pivot). Pair strip
+    # [gx-140, gx-100] on the run-in ground; walk-out strip kept
+    # from B1 where it sits past the pit on one surface (S1 900,
+    # S2 1000@560, S5 1080). S3/S4 have NO walk-out strip: the
+    # filed 1000/860 positions fall on the bridge (inside the swept
+    # zone) / before the saw on the B1 shapes.
+    r = [18, 20, 20, 22, 22][slot - 1]
+    pit_x = [520, 520, 900, 1000, 800][slot - 1]
+    # gx offset into the pit: +40 in S1 (pair strip on the spawn
+    # platform, no arrival edge), +68 in S2-S5 so the pair strip
+    # [gx-140, gx-100] clears the 48px arrival landing zone of
+    # the platform it sits on (see patch_b1f2.py).
+    gx = pit_x + [40, 68, 68, 68, 68][slot - 1]
+    if slot == 1:  # bridge-flat
+        plats = _pb_split_ground([_v3_ground(c)], 520, 160)
+        plats += _vwalls(c, [300, 406])
+        hazards = [saw_swing(gx + 40, 638, gx + 40, 416, 10, 2.0, r),
+                   spikes_up(gx - 140, 40, top=640),
+                   spikes_up(900, 40, top=640)]
+        spawn, door = (70, 640), (1150, 640)
+    elif slot == 2:  # bridge-valley
+        plats = [_vm(c, 0, 560, 320), _vm(c, 320, 600, 80),
+                 _vm(c, 400, 640, 80), _v3_ground(c, 440, 800),
+                 _vm(c, 800, 600, 80), _vm(c, 880, 560, 400)]
+        plats = _pb_split_ground(plats, 520, 160)
+        plats += _vwalls(c, [320, 406])
+        hazards = [saw_swing(gx + 40, 638, gx + 40, 416, 10, 2.0, r),
+                   spikes_up(gx - 140, 40, top=640),
+                   spikes_up(1000, 40, top=560)]
+        spawn, door = (90, 560), (1190, 560)
+    elif slot == 3:  # bridge-stair (stairs-then-bridge, B1 round-2 fix)
+        plats = [_v3_ground(c, 0, 200),
+                 _vm(c, 200, 600, 80), _vm(c, 280, 560, 80),
+                 _vm(c, 360, 520, 80), _vm(c, 440, 520, 160),
+                 _vm(c, 600, 560, 80), _vm(c, 680, 600, 80),
+                 _v3_ground(c, 760, 1280)]
+        plats = _pb_split_ground(plats, 900, 160)
+        plats += _vwalls(c, [300, 406])
+        hazards = [saw_swing(gx + 40, 638, gx + 40, 416, 10, 2.0, r),
+                   spikes_up(500, 40, top=520),
+                   spikes_up(gx - 140, 40, top=640)]
+        spawn, door = (70, 640), (1210, 640)
+    elif slot == 4:  # bridge-T (top bar on two stems, pit after it)
+        plats = [_v3_ground(c, 0, 320),
+                 _vm(c, 320, 600, 80),
+                 plat(400, 560, 480, 20, "solid"),
+                 _vm(c, 480, 580, 64), _vm(c, 800, 580, 64),
+                 _v3_ground(c, 880, 1280)]
+        plats = _pb_split_ground(plats, 1000, 140)
+        plats += _vwalls(c, [300, 406])
+        hazards = [saw_swing(gx + 40, 638, gx + 40, 416, 10, 2.0, r),
+                   spikes_up(200, 40, top=640),
+                   spikes_up(700, 40, top=560),
+                   spikes_up(gx - 140, 40, top=640)]
+        # Door moved 1190 -> 1212 (see patch_b1f3.py): the swing
+        # saw's swept zone reaches 1149.35, inside the 40px door
+        # safe zone of the door rect at 1190.
+        spawn, door = (70, 640), (1212, 640)
+    else:  # slot 5: bridge-terrace (F2: swing T2.6, not 2.0 -- the
+        # 2.0 swing scales to 1.3 in nightmare, below the 1.6 schema
+        # minimum, and the nightmare autopilot dies on all 4
+        # strategies there; 2.6 scales to 1.69 and passes, 402 steps
+        # / 1 death / strategy 1. Normal mode re-verified 5/5.)
+        plats = [_v3_ground(c, 0, 200),
+                 _vm(c, 200, 600, 160), _vm(c, 360, 560, 160),
+                 _vm(c, 520, 520, 160),
+                 _v3_ground(c, 680, 1280)]
+        plats = _pb_split_ground(plats, 800, 140)
+        plats += _vwalls(c, [300, 406])
+        hazards = [saw_swing(gx + 40, 638, gx + 40, 416, 10, 2.6, r),
+                   spikes_up(120, 40, top=640),
+                   spikes_up(580, 40, top=520),
+                   spikes_up(gx - 140, 40, top=640),
+                   spikes_up(1080, 40, top=640)]
+        spawn, door = (70, 640), (1200, 640)
+    return plats + [_fp(c)], hazards, spawn, door, skel
 
 
 def v3_d09(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[9][slot]
     _GKEY[0:3] = [9, slot, variant]
-    # Lane C: horizontal patrol, path saw rest (rx, 618) -> (rx+80, 618),
-    # r22, T3.0, on a flat floor (filed spike-d09-patrol geometry).
-    # Filed strips at 300 + 1000 KEPT except where noted below. Pair
-    # strip in the WALK-OUT at [rx+180, rx+220] (centre rx+200; saw
-    # anchor rx+22; |diff| = 178 <= 300). It MUST be in the walk-out,
-    # not the run-in: a run-in strip ahead of the solver's engagement
-    # stance (~370) breaks SAW_RUNIN_SOLVE (all ok=false; the filed
-    # strategy-0 planned pass degrades to a marginal greedy pass with
-    # 2 deaths — tested on the 520-strip variant). With the strip in
-    # the walk-out the filed run reproduces EXACTLY (PICK takeoff
-    # 669.40 exec 665.35 phase 1.6167 clearance 7.08, strategy 0,
-    # 401 steps, 0 deaths). Far strip: 1000 filed; moved to 1060
-    # where the pair-strip jump landing would leave <10 px run-up to
-    # its takeoff (slots 2, 4); dropped for slot 5 (its pair jump
-    # lands at 966.65). Slots 4-5 move the lower beam (406 -> 390) so
-    # they differ from slots 1/2 in both the traps and layout
-    # signature dims. Declared primary {saw_path, spike_up}.
-    rx = [640, 721, 559, 640, 721][slot - 1]
+    # v1.0.7 lane B1F: Lane C patrol saw RESTORED on the B1 walkways
+    # (the B1 static saws are gone). Horizontal patrol per the filed
+    # spike-d09-patrol geometry, translated to the walkway top:
+    # rest (rx, top-22) -> (rx+80, top-22), r22, T3.0. rx is a
+    # baseline lattice shift; S5 uses rx=640 (not the filed 721 --
+    # 721 would put the far centre past the walkway end and force
+    # a repair rail under the patrol). Pair strip in the WALK-OUT
+    # at [rx+180, rx+220] on the surface under it (never the
+    # run-in -- a run-in strip breaks SAW_RUNIN_SOLVE). Far strip
+    # per the baseline table (1000/1060), seated on one surface
+    # (S2 moved +4px to 1064 so it sits fully on the ground past
+    # the down-step; S5 far dropped, filed). beam_low 406
+    # (slots 1-3) / 390 (slots 4-5) per the filed geometry; the S3
+    # down-teeth move with the beam so they stay flush under it.
+    # Declared primary {saw_path, spike_up}.
+    rx = [640, 721, 559, 478, 559][slot - 1]
+    # F4 (lane F4, 2026-11-22): rx ramp [640,721,559,478,559].
+    # L040/L043/L044 shared the saw (640,538,r22,T3.0,
+    # path ->720,538). S4 -162 and S5 -81 are whole
+    # lattice multiples (-40x4.05, -20x4.05) so the filed
+    # C4 joint floor keeps its lattice alignment; T stays
+    # 3.0 (nightmare 1.95 >= 1.6). S5 shares x=559 with
+    # S3 but at y538 vs y522, so the primary differs.
     beam_low = 406 if slot in (1, 2, 3) else 390
-    pair = rx + 180
-    far = [1000, 1060, 1000, 1060, None][slot - 1]
-    plats = [floor_seg(c, 0, 1280, top=640)] + _laneC_walls(c, beam_low=beam_low)
-    # _fp (off-route edge pillar, as in every other v3 builder): the
-    # D09 floor never moves, so without it slots sharing a beam height
-    # differ in only ONE signature dim (traps) and are rejected as
-    # duplicates (D09S2/S3 dup of S1, S5 dup of S4). _fp varies per
-    # slot (top 460/520/580/640/460, alternating side) and supplies
-    # the second dim; slots 1/5 share an _fp but differ via beams.
-    plats = plats + [_fp(c)]
-    hazards = [saw_path(rx, 618, rx + 80, 618, 3.0, 22),
-               spikes_up(300, 40, top=640), spikes_up(pair, 40, top=640)]
-    if far is not None:
-        hazards.append(spikes_up(far, 40, top=640))
-    return plats, hazards, (70, 640), (1190, 640), skel
+    if slot == 1:  # walkway-flat
+        plats, _saws = _pb_walkway(c, 200, 1, 22, beams=(300, beam_low))
+        hazards = [saw_path(rx, 538, rx + 80, 538, 3.0, 22),
+                   spikes_up(120, 40, top=640),
+                   # Pair strip moved +40px (see patch_b1f2.py): the
+                   # filed [rx+180, rx+220] falls inside the 48px
+                   # arrival landing zone of the down-step.
+                   spikes_up(860, 40, top=600),
+                   spikes_up(1000, 40, top=640)]
+        spawn, door = (70, 640), (1150, 640)
+    elif slot == 2:  # walkway-valley (valley approach into the walkway)
+        core, _saws = _pb_walkway(c, 360, 2, 22, beams=(320, beam_low))
+        plats = [_vm(c, 0, 560, 320), _vm(c, 320, 600, 80)] + core[1:]
+        hazards = [saw_path(rx, 538, rx + 80, 538, 3.0, 22),
+                   spikes_up(200, 40, top=560),
+                   # Pair strip moved [901,941] -> [890,930]
+                   # (see patch_b1f3.py): the filed strip's jump
+                   # lands 1.15px past the walkway end, which makes
+                   # the mixed move inapplicable.
+                   spikes_up(890, 40, top=560),
+                   # Far strip kept at B1's [1020,1060]@600 (see
+                   # patch_b1f2.py): the moved [1064,1104] falls
+                   # inside the ground's arrival landing zone.
+                   spikes_up(1020, 40, top=600)]
+        spawn, door = (90, 560), (1200, 640)
+    elif slot == 3:  # walkway-corridor (544 walkway under 300/406 beams)
+        plats = [_v3_ground(c, 0, 160),
+                 _vm(c, 160, 608, 96), _vm(c, 256, 576, 96),
+                 _vm(c, 352, 544, 96),
+                 _vm(c, 448, 544, 416),
+                 _vm(c, 864, 576, 96), _vm(c, 960, 608, 96),
+                 _v3_ground(c, 1056, 1280)]
+        plats += _vwalls(c, [300, beam_low])
+        hazards = [saw_path(rx, 522, rx + 80, 522, 3.0, 22),
+                   spikes_up(210, 40, top=608),
+                   spikes_up(rx + 180, 40, top=544),
+                   spikes_up(1010, 40, top=608),
+                   _vtd(300, beam_low + 16, 60),
+                   _vtd(1000, beam_low + 16, 60)]
+        spawn, door = (80, 640), (1170, 640)
+    elif slot == 4:  # walkway-gap (bar on two stems, open gap below)
+        plats = [_v3_ground(c, 0, 280),
+                 _vm(c, 280, 600, 80), _vm(c, 360, 560, 80),
+                 plat(440, 560, 480, 20, "solid"),
+                 _vm(c, 480, 580, 64), _vm(c, 800, 580, 64),
+                 _vm(c, 920, 600, 80),
+                 _v3_ground(c, 1000, 1280)]
+        plats += _vwalls(c, [320, beam_low])
+        hazards = [saw_path(rx, 538, rx + 80, 538, 3.0, 22),
+                   spikes_up(180, 40, top=640),
+                   spikes_up(rx + 180, 40, top=560),
+                   spikes_up(1080, 40, top=640)]
+        spawn, door = (100, 640), (1190, 640)
+    else:  # slot 5: walkway-terrace (walkway + terrace exit plateau)
+        core, _saws = _pb_walkway(c, 160, 3, 22, beams=(300, beam_low))
+        plats = core[:5] + [_vm(c, 864, 600, 160),
+                            _v3_ground(c, 1024, 1280)] + core[6:]
+        hazards = [saw_path(rx, 538, rx + 80, 538, 3.0, 22),
+                   spikes_up(210, 40, top=600),
+                   # F4: pair strip DECOUPLED from rx, stays
+                   # at 820 (top 600, on the [768,864] step).
+                   # rx+180 = 739 would float over the 560
+                   # walkway. Saw 559..639 still on walkway.
+                   spikes_up(820, 40, top=600)]
+        spawn, door = (90, 640), (1210, 640)
+    return plats + [_fp(c)], hazards, spawn, door, skel
 
-
-# ---------------------------------------------------------------------------
-# D10 gap-saws -- path saw over a gap (filed spike-d10-gap-patrol).
-# ---------------------------------------------------------------------------
 
 def v3_d10(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[10][slot]
     _GKEY[0:3] = [10, slot, variant]
-    # Lane C: gap [gx, gx+65], platforms [0, gx] + [gx+65, 1280], path
-    # saw rest (gx, 618) -> (gx+65, 618), r22, T2.0; stone under the
-    # gap. Pair strip on platform 0 at [gx-180, gx-140] (centre gx-160;
-    # saw anchor gx+32; |diff| = 192 <= 300); its jump arc ends
-    # (hero right edge gx-106.85) 104.85 px short of the swept disc
-    # zone [gx-22, gx+87]. Walk-out strip on platform 1 at
-    # [gx+220, gx+260] (centre gx+240; |diff| = 208 <= 300).
-    # SAW ANCHORING (rail fix): the filed rest (gx+20)->(gx+80) made
-    # _saw_touch_ok False (sweep centres 29.7/26.6 px from any solid
-    # > r+GTOL=26), so repair_grounding/_repair_saws appended a rail
-    # (gx-22, 636, 104, 84) that BRIDGED the gap -- the autopilot then
-    # walked the rail and never executed the admitted edge arc (D10
-    # 0/5 PICKS, L048/L049 died on a second strip). Anchoring the
-    # patrol to the gap edges -- rest (gx, 618), far (gx+65, 618) --
-    # puts both sweep centres exactly 22 px (= r) above the floor
-    # corners, so _saw_touch_ok is True and no rail is added; the gap
-    # stays a real gap. The patrol travel is 65 px (filed 60 px); the
-    # mixed move is re-verified by the checker + a fresh probe.
-    # NO second platform-0 strip in slots 4-5: it killed the autopilot
-    # (L048 died at feet 353.5, L049 at 195.6 -- right at the strip
-    # edge; the solver's ok=false at the early stance suppresses the
-    # greedy strip jump). The pair + walk-out strips already give a
-    # surviving (saw, spike_up) pair in every slot.
-    # Declared primary {saw_path, spike_up, gap}: pair demo +
-    # gap-binding (the jump spans the gap; landing must be on
-    # platform 1).
-    gx = [600, 640, 560, 680, 520][slot - 1]
-    plats = [floor_seg(c, 0, gx, top=640), floor_seg(c, gx + 65, 1280, top=640),
-             plat(gx + 12, 656, 53, 64, "solid")] + _laneC_walls(c) + [_fp(c)]
-    # _fp (off-route edge pillar, as in every other v3 builder and
-    # D09): without it, D10S2/S3 are DUPLICATES of D08S2/S3 -- the
-    # 15 px gap-width difference (80 vs 65) does not cross a layout
-    # bucket boundary when gx mod 16 == 0 (640, 560), so only the
-    # traps dim differs (needs >= 2). _fp supplies the second dim.
-    hazards = [saw_path(gx, 618, gx + 65, 618, 2.0, 22),
-               spikes_up(gx - 180, 40, top=640), spikes_up(gx + 220, 40, top=640)]
-    return plats, hazards, (70, 640), (1190, 640), skel
+    # v1.0.7 lane F1 (O1 fix): the saw is RESTORED over the gap. The
+    # B1F build patrolled solid floor 260-385px away from the gap,
+    # breaking the VARIETY-PLAN hard constraint ("pier + saw_path
+    # over gap") and changing the door's choreography to saw-on-
+    # approach + separate stone crossing. The filed baseline geometry
+    # is restored on the B1F pier shapes: a real 65px void gap
+    # [gx, gx+65] (gx = px, the pier-shape pit origin), saw_path
+    # (gx,618)->(gx+65,618) r22 T2.0 over it, the filed stone under
+    # the gap (solid 53x64 at (gx+12,656)), pair strip on platform 0
+    # at [gx-180, gx-140]. The solid pier now starts at the gap's
+    # far edge (gx+65) and keeps its filed right edge, so stone 2
+    # (dashed/falling, ramp stand/period) and the ground after it
+    # are unchanged from the B1F shape; only stone 1's 120px solid
+    # slab is replaced by the gap + pier extension. A 65px VOID (not
+    # a 120px walk-across stone) is what makes the filed patrol
+    # crossable: the hero must JUMP the gap (mixed move, joint
+    # floor F1/F2/F3 -- the B1F 120px stone could not do this, cf.
+    # patch_b1f3.py). Ramp kept: stone stand [1.4,1.2,1.2,1.0,1.0],
+    # period [3.0,2.8,2.8,2.6,2.6]. Declared primary
+    # {saw_path, spike_up, gap}.
+    stand = [1.4, 1.2, 1.2, 1.0, 1.0][slot - 1]
+    # F3 (lane F3, 2026-11-22): gap-saw period varied per slot
+    # [2.6, 2.8, 3.0, 3.2, 3.2] -- nightmare x0.65 gives
+    # 1.69/1.82/1.95/2.08/2.08, all >= the 1.6 schema
+    # minimum (MOVING_MIN_PERIOD). The uniform 2.0 scaled
+    # to 1.3 in nightmare and killed L049 on all 4 autopilot
+    # strategies (merge blocker). 2.6 is F2's proven D08S5
+    # value; the ramp adds timing variety per slot.
+    # Slot 5 (L049) is 3.2 by sweep (see lane report §1): 3.4
+    # failed normal, 2.6 failed nightmare, 3.0 failed
+    # nightmare; 2.8 and 3.2 pass both modes and 3.2 has
+    # the clean normal pass (strategy 0, 0 deaths).
+    saw_T = [2.6, 2.8, 3.0, 3.2, 3.2][slot - 1]
+    period = [3.0, 2.8, 2.8, 2.6, 2.6][slot - 1]
+    on = [2.0, 1.8, 1.8, 1.6, 1.6][slot - 1]
+    px = [400, 440, 360, 480, 520][slot - 1]
+    gx = px
+    pier_w = 300 if slot == 2 else 240
 
+    def _pier_gap(kind2, beams):
+        # Core pier-shape platforms: ground 0..gx, void gap
+        # [gx,gx+65] with the filed stone under it, solid pier
+        # [gx+65, gx+120+pier_w], timed stone 2, ground after.
+        if kind2 == "dashed":
+            stone2 = _vdash(gx + 120 + pier_w, 640, 120, period, 0.0, on)
+        else:  # falling
+            stone2 = _vpit(gx + 120 + pier_w, 640, 120, stand)
+        return ([_v3_ground(c, 0, gx),
+                 _vb(gx + 12, 656, 53, 64),
+                 plat(gx + 65, 640, pier_w + 55, 80, "solid"),
+                 stone2,
+                 _v3_ground(c, gx + 240 + pier_w, 1280)]
+                + _vwalls(c, list(beams)))
 
-# ---------------------------------------------------------------------------
-# D11 spiked-columns -- 26x36 columns only.
-# ---------------------------------------------------------------------------
+    if slot == 1:  # pier-dashed
+        plats = _pier_gap("dashed", beams=(300, 420))
+        hazards = [saw_path(gx, 618, gx + 65, 618, saw_T, 22),
+                   spikes_up(gx - 180, 40, top=640),
+                   spikes_up(gx + 220, 40, top=640),
+                   spikes_up(1000, 40, top=640)]
+        spawn, door = (70, 640), (1190, 640)
+    elif slot == 2:  # pier-mover
+        plats = _pier_gap("dashed", beams=(320, 440))
+        hazards = [saw_path(gx, 618, gx + 65, 618, saw_T, 22),
+                   spikes_up(gx - 180, 40, top=640),
+                   spikes_up(gx + 220, 40, top=640),
+                   spikes_up(1040, 40, top=640)]
+        spawn, door = (70, 640), (1200, 640)
+    elif slot == 3:  # pier-corridor
+        plats = _pier_gap("dashed", beams=(300, 420))
+        hazards = [saw_path(gx, 618, gx + 65, 618, saw_T, 22),
+                   spikes_up(gx - 180, 40, top=640),
+                   spikes_up(gx + 220, 40, top=640),
+                   spikes_up(980, 40, top=640),
+                   _vtd(300, 436, 60), _vtd(1000, 436, 60)]
+        spawn, door = (70, 640), (1170, 640)
+    elif slot == 4:  # pier-falling
+        plats = _pier_gap("falling", beams=(320, 440))
+        hazards = [saw_path(gx, 618, gx + 65, 618, saw_T, 22),
+                   spikes_up(gx - 180, 40, top=640),
+                   spikes_up(gx + 220, 40, top=640),
+                   spikes_up(1060, 40, top=640)]
+        spawn, door = (80, 640), (1210, 640)
+    else:  # slot 5: pier-valley
+        core = _pier_gap("dashed", beams=(320, 440))
+        # Valley approach steps: the filed 40px pair strip
+        # [gx-180, gx-140] = [340,380] cannot sit on the B1
+        # 600-step [320,400] (its [320,368] arrival landing zone
+        # rejects the edge), so the SHAPE moves, not the strip:
+        # 560-step [0,280], 600-step [280,400] -- the strip now
+        # clears the [280,328] zone by 12px; gap and door stay put.
+        plats = ([_vm(c, 0, 560, 280), _vm(c, 280, 600, 120),
+                  _vm(c, 400, 640, 120)] + core[1:4]
+                 + [_vm(c, 1000, 600, 80), _vm(c, 1080, 560, 200)]
+                 + core[5:])
+        hazards = [saw_path(gx, 618, gx + 65, 618, saw_T, 22),
+                   spikes_up(200, 40, top=560),
+                   spikes_up(gx - 180, 40, top=600),
+                   spikes_up(gx + 220, 40, top=640)]
+        spawn, door = (90, 560), (1190, 560)
+    return plats + [_fp(c)], hazards, spawn, door, skel
+
 
 def v3_d11(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[11][slot]
@@ -5785,61 +6120,92 @@ def v3_d11(c, kk, salt, slot, variant):
         plats, spawn, door = _r_flat(c)
         hazards = [_h_col(320, 640), _h_col(620, 640), _h_col(920, 640),
                    _vt(_vo(variant, [980, 1020, 1060]), 640, 40)]
+        spawn, door = (80, 640), (1160, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     elif slot == 2:  # valley-columns
         plats, spawn, door = _r_valley(c, variant)
         hazards = [_h_col(540, 640), _h_col(660, 640),
                    _h_col(_vo(variant, [1020, 1060, 1100]), 560)]
+        spawn, door = (100, 560), (1170, 560)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     elif slot == 3:  # stair-columns (redesigned treads)
         plats, spawn, door, x0 = _r_stairs32(c, variant)
         hazards = [_h_col(x0 + 70, 608), _h_col(x0 + 166, 576),
                    _h_col(x0 + 262, 544),
                    _vt(x0 + 470, 512, 40), _vt(1080, 640, 40)]
-    elif slot == 4:  # corridor-columns
-        plats, spawn, door = _r_flat(c, beams=(300, 420))
-        hazards = [_h_col(320, 640), _h_col(620, 640), _h_col(920, 640),
-                   _vtd(_vo(variant, [410, 450, 490]), 496, 60)]
+        spawn, door = (80, 640), (1200, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
+    elif slot == 4:  # corridor-columns (v1.0.7: REAL corridor --
+        # a raised 576 plateau under the 320/440 beams; columns on
+        # the ground, on the plateau, and on the ground after it.
+        plats = [_v3_ground(c, 0, 440),
+                 _vm(c, 440, 608, 80), _vm(c, 520, 576, 80),
+                 _vm(c, 600, 576, 240),
+                 _vm(c, 840, 608, 80),
+                 _v3_ground(c, 920, 1280)]
+        plats += _vwalls(c, [320, 440])
+        hazards = [_h_col(300, 640), _h_col(700, 576), _h_col(1000, 640),
+                   _vtd(500, 456, 60)]
+        spawn, door = (70, 640), (1190, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
     else:  # slot 5: terrace-columns
         plats, spawn, door, bx = _r_terraces(c, variant)
         hazards = [_h_col(bx + 60, 600), _h_col(bx + 360, 560),
                    _h_col(bx + 600, 520), _vt(bx + 810, 600, 40)]
-    return plats + [_fp(c)], hazards, spawn, door, skel
+        spawn, door = (80, 640), (1210, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
 
 
 # ---------------------------------------------------------------------------
-# D13 falling-floors -- falling stones in gaps / in the ground line.
+# D13 falling-floors -- falling stones in the floor line.
+# v1.0.7 variety redesign (lane B2): S1/S2/S3/S4 shared one flat 640
+# floor line. Same mechanic, same stand-time draws; floor shape and
+# door position now differ per slot.
 # ---------------------------------------------------------------------------
 
 def v3_d13(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[13][slot]
     _GKEY[0:3] = [13, slot, variant]
-    if slot == 1:  # flat-falling-chain
+    st = _vo(variant, [1.0, 1.2, 1.4])
+    if slot == 1:  # flat-falling-chain (door moved)
         plats, spawn, door = _r_gap2(c, variant, "falling", "falling")
         hazards = [_vt(560, 640, 50), _vt(800, 640, 50)]
-    elif slot == 2:  # pit-falling
-        plats, spawn, door, px = _r_pit(c, variant, "falling")
-        hazards = [_vt(px + 180, 640, 50),
-                   _vt(950, 640, 50, trigger_x=850, delay=0.3)]
-    elif slot == 3:  # double-pit-falling
-        px = _vo(variant, [380, 420, 460])
+        door = (1120, 640)
+    elif slot == 2:  # step-descent pit-falling
+        plats = [_vm(c, 0, 520, 360),
+                 _vm(c, 360, 560, 80), _vm(c, 440, 600, 80),
+                 _v3_ground(c, 520, 700),
+                 _vpit(700, 640, 90, st),
+                 _v3_ground(c, 790, 1000),
+                 _vm(c, 1000, 600, 80), _vm(c, 1080, 560, 200)]
+        plats += _vwalls(c, [320, 420])
+        hazards = [_vt(580, 640, 40), _vt(900, 640, 40)]
+        spawn, door = (90, 520), (1190, 560)
+    elif slot == 3:  # terrace double-pit-falling
         st1 = _vo(variant, [1.0, 1.2, 1.4])
         st2 = _vo(variant, [1.2, 1.4, 1.0])
-        qx = px + 330
-        plats = [_v3_ground(c, 0, px),
-                 _vpit(px, 640, 90, st1),
-                 _v3_ground(c, px + 90, qx),
-                 _vpit(qx, 640, 90, st2),
-                 _v3_ground(c, qx + 90, 1280)]
+        plats = [_v3_ground(c, 0, 380),
+                 _vpit(380, 640, 90, st1),
+                 _v3_ground(c, 470, 710),
+                 _vpit(710, 640, 90, st2),
+                 _v3_ground(c, 800, 1280),
+                 _vm(c, 140, 600, 160), _vm(c, 900, 600, 160),
+                 _vm(c, 1080, 560, 120)]
         plats += _vwalls(c, [340, 440])
-        hazards = [_vt(px + 180, 640, 50), _vt(950, 640, 50)]
-        spawn, door = (70, 640), (1190, 640)
-    elif slot == 4:  # corridor-falling
-        plats, spawn, door, px = _r_pit(c, variant, "falling",
-                                        (480, 520, 560))
-        hazards = [_vt(px + 180, 640, 50), _vtd(450, 496, 60),
+        hazards = [_vt(560, 640, 50), _vt(852, 640, 40)]
+        spawn, door = (70, 640), (1150, 560)
+    elif slot == 4:  # raised-corridor pit-falling (600 floor line)
+        px = _vo(variant, [480, 520, 560])
+        plats = [_v3_ground(c, 0, px, top=600),
+                 plat(px, 600, 90, 120, "falling",
+                      stand_time=float(st)),
+                 _v3_ground(c, px + 90, 1280, top=600)]
+        plats += _vwalls(c, [300, 480])
+        hazards = [_vt(px + 180, 600, 50), _vtd(450, 496, 60),
                    _vtd(950, 496, 60)]
-    else:  # slot 5: valley-falling
+        spawn, door = (70, 600), (1120, 600)
+    else:  # slot 5: valley-falling (door moved)
         px = _vo(variant, [620, 640, 660])
-        st = _vo(variant, [1.0, 1.2, 1.4])
         plats = [_vm(c, 0, 560, 400),
                  _vm(c, 400, 600, 80), _vm(c, 480, 640, 80),
                  _v3_ground(c, 560, px),
@@ -5848,29 +6214,22 @@ def v3_d13(c, kk, salt, slot, variant):
                  _vm(c, 840, 600, 80), _vm(c, 920, 560, 80),
                  _vm(c, 1000, 560, 280)]
         plats += _vwalls(c, [320, 420])
-        hazards = [_vt(px + 140, 640, 40), _vt(_vo(variant, [1050, 1060, 1070]), 560, 50)]
-        spawn, door = (90, 560), (1190, 560)
+        hazards = [_vt(px + 140, 640, 40),
+                   _vt(_vo(variant, [1050, 1060, 1070]), 560, 50)]
+        spawn, door = (90, 560), (1210, 560)
     return plats + [_fp(c)], hazards, spawn, door, skel
 
 
 # ---------------------------------------------------------------------------
 # D14 tilting-blocks -- tilting stones in gaps / in the ground line.
+# v1.0.7 variety redesign (lane B2): S1/S3/S4 shared one flat 640
+# floor line. Same mechanic (tilting + periodic popup on the same
+# divider) and same slot ramp; floor shape and door differ per slot.
 # ---------------------------------------------------------------------------
 
 def v3_d14(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[14][slot]
     _GKEY[0:3] = [14, slot, variant]
-    # Part B: tilting stones PAIRED with a PERIODIC POPUP strip on
-    # the solid divider between them -- the popup and the stones
-    # must be timed simultaneously (D10-pier pattern, tilting+popup).
-    # Ramp (slot-indexed): stand_time SHORTENS and the popup period
-    # SHORTENS across slots 1->5, so the stones tilt as a warning
-    # and then drop sooner while the popup cycles faster.
-    # HONEST NOTE: the tilting element itself still equals D13's
-    # falling; distinctness rests on the simultaneous popup pairing.
-    # A static saw pairing was tried first and is CHECKER-FORBIDDEN
-    # (rule 11: saws are not allowed in D14's spike-family
-    # archetype), so the popup is the strongest builder-only option.
     stand = [2.0, 1.8, 1.8, 1.6, 1.6][slot - 1]
     pop_period = [3.4, 3.0, 3.0, 2.6, 2.6][slot - 1]
     pop_on = [1.6, 1.4, 1.4, 1.2, 1.2][slot - 1]
@@ -5878,7 +6237,7 @@ def v3_d14(c, kk, salt, slot, variant):
     def _tilt(x, w, top=640):
         return plat(x, top, w, 20, "tilting", stand_time=float(stand))
 
-    if slot == 1:  # flat-tilting-pair (popup on the 200px divider)
+    if slot == 1:  # flat-tilting-pair (door moved)
         plats = [_v3_ground(c, 0, 300),
                  _tilt(300, 120),
                  _v3_ground(c, 420, 620),
@@ -5888,8 +6247,8 @@ def v3_d14(c, kk, salt, slot, variant):
         hazards = [_vt(200, 640, 40),
                    _h_popup(520, 640, 45, pop_period, 0.0, pop_on),
                    _vt(1000, 640, 40)]
-        spawn, door = (70, 640), (1190, 640)
-    elif slot == 2:  # stair-tilting-pair (core on a 512 plateau)
+        spawn, door = (70, 640), (1120, 640)
+    elif slot == 2:  # stair-tilting-pair (unchanged)
         steps, _, _ = _vstairs_up(c, 200, 640, 4, tread=96, rise=32)
         plats = [_v3_ground(c, 0, 200)] + steps + [
                  _vm(c, 584, 512, 56),
@@ -5902,30 +6261,35 @@ def v3_d14(c, kk, salt, slot, variant):
                    _h_popup(840, 512, 45, pop_period, 0.7, pop_on),
                    _vt(1080, 640, 40)]
         spawn, door = (70, 640), (1190, 640)
-    elif slot == 3:  # double-pit-tilting (popup on the 240px divider)
-        px = _vo(variant, [380, 420, 460])
-        qx = px + 330
-        plats = [_v3_ground(c, 0, px),
+    elif slot == 3:  # valley double-pit-tilting
+        px = _vo(variant, [560, 600, 640])
+        qx = px + 300
+        plats = [_vm(c, 0, 560, 320),
+                 _vm(c, 320, 600, 80), _vm(c, 400, 640, 80),
+                 _v3_ground(c, 480, px),
                  _tilt(px, 90),
                  _v3_ground(c, px + 90, qx),
                  _tilt(qx, 90),
-                 _v3_ground(c, qx + 90, 1280)]
-        plats += _vwalls(c, [340, 440])
-        hazards = [_h_popup(px + 210, 640, 45, pop_period, 1.4, pop_on),
-                   _vt(950, 640, 50)]
-        spawn, door = (70, 640), (1190, 640)
-    elif slot == 4:  # corridor-tilting-pair (flat core + beams)
-        plats = [_v3_ground(c, 0, 340),
-                 _tilt(340, 120),
-                 _v3_ground(c, 460, 620),
-                 _tilt(620, 120),
-                 _v3_ground(c, 740, 1280)]
+                 _v3_ground(c, qx + 90, 1080),
+                 _vm(c, 1080, 600, 80), _vm(c, 1160, 560, 120)]
+        plats += _vwalls(c, [320, 420])
+        hazards = [_vt(200, 560, 40),
+                   _h_popup(px + 150, 640, 45, pop_period, 1.4, pop_on)]
+        spawn, door = (90, 560), (1210, 560)
+    elif slot == 4:  # terrace-tilting-pair (corridor beams + teeth)
+        plats = [_v3_ground(c, 0, 360),
+                 _tilt(360, 120),
+                 _v3_ground(c, 480, 700),
+                 _tilt(700, 120),
+                 _v3_ground(c, 820, 1280),
+                 _vm(c, 140, 600, 160), _vm(c, 900, 600, 160)]
         plats += _vwalls(c, [300, 420])
-        hazards = [_vt(200, 640, 40),
-                   _h_popup(540, 640, 45, pop_period, 0.0, pop_on),
-                   _vtd(450, 496, 60), _vtd(950, 496, 60)]
-        spawn, door = (70, 640), (1190, 640)
-    else:  # slot 5: valley-tilting-pair (popup on the 120px divider)
+        hazards = [_vt(200, 600, 40),
+                   _h_popup(590, 640, 45, pop_period, 0.0, pop_on),
+                   _vt(1000, 600, 40),
+                   _vtd(450, 436, 60), _vtd(950, 436, 60)]
+        spawn, door = (70, 640), (1150, 640)
+    else:  # slot 5: valley-tilting-pair (unchanged)
         plats = [_vm(c, 0, 560, 400),
                  _vm(c, 400, 600, 80),
                  _tilt(480, 80),
@@ -6042,72 +6406,103 @@ def v3_d16(c, kk, salt, slot, variant):
 
 
 # ---------------------------------------------------------------------------
-# D18 wall-spikes -- side teeth on edge walls + stair faces, ground strips.
-# Side teeth sit on wall faces above the walking band (edge-wall teeth
-# at beam height, pilot D02S3 pattern) so they threaten jump arcs,
-# never the walk itself.
+# D18 wall-spikes -- drop-shaft (spike-proven v3).
+# v1.0.7 variety redesign (lane B2): all five slots were one
+# steps+plateau+shaft shape (11 platforms each, door 834..814).
+# Same mechanic (climb in, fall the shaft, door on the shaft floor,
+# side teeth on both shaft faces) and same ramp (shaft width
+# [260,240,240,220,220], teeth height [40,48,48,56,60]); only the
+# FLOOR SHAPE changes per slot.
 # ---------------------------------------------------------------------------
 
 def v3_d18(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[18][slot]
     _GKEY[0:3] = [18, slot, variant]
-    # Part B: drop-shaft (spike-proven v3). Steps (rise 40, tread 96)
-    # up to a 480 plateau; the hero drops 160px from the plateau
-    # edge into a shaft and lands on the ground, where the door
-    # stands on the shaft floor. Side teeth on BOTH shaft faces at
-    # y520+ threaten drift during the fall (D31's proven vertical-
-    # fall pattern); the block past the door never obstructs the
-    # ground route because the door is BEFORE it. The directed
-    # "side teeth at jump height on a jumpable block" is UNBUILDABLE
-    # under the frozen checker (proven in the spike report) and is
-    # NOT attempted here. Ramp (slot-indexed): shaft width narrows
-    # [260,240,240,220,220] and teeth height grows [40,48,48,56,60].
-    # (S5's steps start at 200 and its strips sit at 520/640 so the
-    # slot differs from S4 in layout, traps and solution -- S5 with
-    # x0=140 duplicated S4 under the dedupe.)
-    x0 = [120, 80, 160, 100, 200][slot - 1]
     shaft_w = [260, 240, 240, 220, 220][slot - 1]
     teeth_h = [40, 48, 48, 56, 60][slot - 1]
-    block_x = 704 + shaft_w
-    door_x = 704 + shaft_w // 2
-    plats = [_v3_ground(c),
-             _vm(c, x0, 600, 96), _vm(c, x0 + 96, 560, 96),
-             _vm(c, x0 + 192, 520, 96),
-             _vm(c, x0 + 288, 480, 704 - (x0 + 288)),
-             _vm(c, block_x, 480, 100)]
-    plats += _vwalls(c, [260, 320])
-    hazards = [{"type": "spikes", "dir": "right", "x": 704, "y": 520,
-                "w": 10, "h": teeth_h},
-               {"type": "spikes", "dir": "left", "x": block_x - 10,
-                "y": 520, "w": 10, "h": teeth_h},
-               _vt(500 if slot < 5 else 520, 480, 40)]
-    if slot >= 3:
-        hazards.append(_vt(600 if slot < 5 else 640, 480, 40))
-    return plats + [_fp(c)], hazards, (70, 640), (door_x, 640), skel
+
+    def _teeth(shaft_x, block_x):
+        return [{"type": "spikes", "dir": "right", "x": shaft_x, "y": 520,
+                 "w": 10, "h": teeth_h},
+                {"type": "spikes", "dir": "left", "x": block_x - 10,
+                 "y": 520, "w": 10, "h": teeth_h}]
+
+    if slot == 1:  # shaft-straight (baseline shape)
+        x0 = 120
+        block_x = 704 + shaft_w
+        plats = [_v3_ground(c),
+                 _vm(c, x0, 600, 96), _vm(c, x0 + 96, 560, 96),
+                 _vm(c, x0 + 192, 520, 96),
+                 _vm(c, x0 + 288, 480, 704 - (x0 + 288)),
+                 _vm(c, block_x, 480, 100)]
+        plats += _vwalls(c, [260, 320])
+        hazards = _teeth(704, block_x) + [_vt(500, 480, 40)]
+        spawn, door = (70, 640), (704 + shaft_w // 2, 640)
+    elif slot == 2:  # shaft-stepped-bottom
+        x0 = 80
+        block_x = 704 + shaft_w
+        plats = [_v3_ground(c),
+                 _vm(c, x0, 600, 96), _vm(c, x0 + 96, 560, 96),
+                 _vm(c, x0 + 192, 520, 96),
+                 _vm(c, x0 + 288, 480, 704 - (x0 + 288)),
+                 _vm(c, 704, 600, 120),
+                 _vm(c, block_x, 480, 100)]
+        plats += _vwalls(c, [260, 320])
+        hazards = _teeth(704, block_x) + [_vt(500, 480, 40)]
+        spawn, door = (70, 640), (860, 640)
+    elif slot == 3:  # shaft-stair (5-step climb to a 440 plateau)
+        x0 = 120
+        block_x = 704 + shaft_w
+        steps, _, _ = _vstairs_up(c, x0, 640, 5, tread=96, rise=40)
+        plats = [_v3_ground(c, 0, x0)] + steps + [
+                 _vm(c, x0 + 480, 440, 704 - (x0 + 480)),
+                 _v3_ground(c, 704, 1280),
+                 _vm(c, block_x, 480, 100)]
+        plats += _vwalls(c, [260, 320])
+        hazards = _teeth(704, block_x) + [_vt(560, 440, 40)]
+        spawn, door = (70, 640), (704 + shaft_w // 2, 640)
+    elif slot == 4:  # shaft-corridor (plateau walk under a low beam)
+        x0 = 120
+        block_x = 640 + shaft_w
+        steps, _, _ = _vstairs_up(c, x0, 640, 3, tread=96, rise=40)
+        plats = [_v3_ground(c, 0, x0)] + steps + [
+                 _vm(c, x0 + 288, 480, 640 - (x0 + 288)),
+                 _v3_ground(c, 640, 1280),
+                 _vm(c, block_x, 480, 100)]
+        plats += _vwalls(c, [300, 369])
+        hazards = _teeth(640, block_x) + [
+                   _vtd(450, 385, 60), _vtd(540, 385, 60)]
+        spawn, door = (70, 640), (640 + shaft_w // 2, 640)
+    else:  # slot 5: shaft-terrace
+        x0 = 200
+        block_x = 704 + shaft_w
+        plats = [_v3_ground(c),
+                 _vm(c, x0, 600, 160), _vm(c, x0 + 200, 600, 80),
+                 _vm(c, x0 + 280, 560, 160),
+                 _vm(c, x0 + 440, 520, 64),
+                 _vm(c, block_x, 480, 100)]
+        plats += _vwalls(c, [300, 380])
+        hazards = _teeth(704, block_x) + [_vt(650, 520, 40)]
+        spawn, door = (70, 640), (704 + shaft_w // 2, 640)
+    return plats + [_fp(c)], hazards, spawn, door, skel
 
 
 # ---------------------------------------------------------------------------
 # D20 double-gaps -- two gap stones, spike-family (NO saws: legacy
 # b_double_gaps carried a path saw; rule 11 forbids it here).
+# v1.0.7 variety redesign (lane B2): S4 was a flat dashed pair
+# identical to S1 except for down-teeth; it is now a raised 600
+# corridor pair, and doors move across slots. S1/S2/S3/S5 geometry
+# unchanged; S1/S3/S5 doors moved.
 # ---------------------------------------------------------------------------
 
 def v3_d20(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[20][slot]
     _GKEY[0:3] = [20, slot, variant]
-    # Part B: SYNC PAIRS -- both stones the same kind with IDENTICAL
-    # timing (dashed: same period/phase/on_time; falling/tilting:
-    # same stand_time), separated by a NARROW 60px solid landing
-    # strip. The two stones share one clock, so they must be crossed
-    # in one on-window (dashed) or before either drops (falling /
-    # tilting); the 60px strip is the only safe ground between them.
-    # Ramp (slot-indexed): dashed period shortens + on_time shortens;
-    # falling/tilting stand_time shortens across slots 1->5.
-    # HONEST NOTE: sync-pair is a timing link, not a field link --
-    # the stones do not depend on each other mechanically.
     dash_period = [3.0, 2.8, 2.8, 2.6, 2.6][slot - 1]
     dash_on = [2.0, 2.0, 1.8, 1.8, 1.6][slot - 1]
     stand = [1.4, 1.2, 1.2, 1.0, 1.0][slot - 1]
-    if slot == 1:  # dashed pair, flat
+    if slot == 1:  # dashed pair, flat (door moved)
         plats = [_v3_ground(c, 0, 400),
                  _vdash(400, 640, 100, dash_period, 0.0, dash_on),
                  _vm(c, 500, 640, 60),
@@ -6115,8 +6510,8 @@ def v3_d20(c, kk, salt, slot, variant):
                  _v3_ground(c, 660, 1280)]
         plats += _vwalls(c, [300, 420])
         hazards = [_vt(200, 640, 40), _vt(1000, 640, 40)]
-        spawn, door = (70, 640), (1190, 640)
-    elif slot == 2:  # falling pair, valley
+        spawn, door = (70, 640), (1120, 640)
+    elif slot == 2:  # falling pair, valley (unchanged)
         plats = [_vm(c, 0, 560, 360),
                  _vm(c, 360, 600, 80), _vm(c, 440, 640, 80),
                  _vpit(520, 640, 100, stand),
@@ -6127,7 +6522,7 @@ def v3_d20(c, kk, salt, slot, variant):
         plats += _vwalls(c, [300, 420])
         hazards = [_vt(200, 560, 40), _vt(900, 640, 40)]
         spawn, door = (90, 560), (1190, 560)
-    elif slot == 3:  # tilting pair, stairs to a 512 plateau
+    elif slot == 3:  # tilting pair, stairs to a 512 plateau (door moved)
         steps, _, _ = _vstairs_up(c, 200, 640, 4, tread=96, rise=32)
         plats = [_v3_ground(c, 0, 200)] + steps + [
                  plat(584, 512, 100, 20, "tilting",
@@ -6140,18 +6535,21 @@ def v3_d20(c, kk, salt, slot, variant):
                  _v3_ground(c, 1132, 1280)]
         plats += _vwalls(c, [300, 380])
         hazards = [_vt(120, 640, 40), _vt(1088, 576, 40)]
-        spawn, door = (70, 640), (1190, 640)
-    elif slot == 4:  # dashed pair, corridor
-        plats = [_v3_ground(c, 0, 400),
-                 _vdash(400, 640, 100, dash_period, 0.0, dash_on),
-                 _vm(c, 500, 640, 60),
-                 _vdash(560, 640, 100, dash_period, 0.0, dash_on),
-                 _v3_ground(c, 660, 1280)]
+        spawn, door = (70, 640), (1210, 640)
+    elif slot == 4:  # dashed pair, raised corridor (600 terrace)
+        plats = [_v3_ground(c, 0, 320),
+                 _vm(c, 320, 600, 80),
+                 _vm(c, 400, 600, 200),
+                 _vdash(600, 600, 100, dash_period, 0.0, dash_on),
+                 _vm(c, 700, 600, 60),
+                 _vdash(760, 600, 100, dash_period, 0.0, dash_on),
+                 _vm(c, 860, 600, 140),
+                 _v3_ground(c, 1000, 1280)]
         plats += _vwalls(c, [300, 420])
-        hazards = [_vt(200, 640, 40), _vt(1000, 640, 40),
-                   _vtd(450, 496, 60)]
+        hazards = [_vt(200, 640, 40), _vt(500, 600, 40),
+                   _vtd(450, 436, 60)]
         spawn, door = (70, 640), (1190, 640)
-    else:  # slot 5: falling pair, terraces (pair on the 560 plateau)
+    else:  # slot 5: falling pair, terraces (door moved)
         plats = [_v3_ground(c, 0, 300),
                  _vm(c, 300, 600, 260),
                  _vpit(560, 560, 100, stand),
@@ -6161,30 +6559,23 @@ def v3_d20(c, kk, salt, slot, variant):
                  _v3_ground(c, 1080, 1280)]
         plats += _vwalls(c, [300, 420])
         hazards = [_vt(150, 640, 40)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (70, 640), (1150, 640)
     return plats + [_fp(c)], hazards, spawn, door, skel
 
 
 # ---------------------------------------------------------------------------
 # D21 pit-bridges -- falling/tilting stones over a pit with a solid
 # divider (legacy pattern, v3 ground 640). Widest stones, mixed kinds.
+# v1.0.7 variety redesign (lane B2): S4 was a flat bridge identical
+# to S1 except for down-teeth; it is now a raised 600 terrace bridge
+# with a periodic pillar (a triggered pillar would land buried in
+# the 600 divider, as S5's note records for 560). Doors move.
+# S1/S2/S3/S5 geometry unchanged.
 # ---------------------------------------------------------------------------
 
 def v3_d21(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[21][slot]
     _GKEY[0:3] = [21, slot, variant]
-    # Part B: the pit-bridge KEEPS its two dropping stones + solid
-    # divider, and a TRIGGERED PILLAR now drops over the divider in
-    # every slot. The pillar is fully down before the hero arrives
-    # (pillar_safe_trigger), so it stands on the divider as a 24px
-    # landed block the hero must jump over -- onto the second stone.
-    # The pit itself is the mechanic (bridge + pillar, simultaneous).
-    # Ramp (slot-indexed): pillar speed rises, stone stand_time
-    # shortens across slots 1->5. S5's bridge sits at 560, where a
-    # triggered pillar would land buried inside the 160-tall divider
-    # pier, so S5 uses a PERIODIC pillar over the divider instead
-    # (its threat is the fall through the bridge, not the landed
-    # block) -- noted honestly.
     pw = _vo(variant, [220, 240, 260])
     w = {220: 70, 240: 80, 260: 90}[pw]
     kind1 = _vo(variant, ["falling", "tilting", "falling"])
@@ -6211,7 +6602,7 @@ def v3_d21(c, kk, salt, slot, variant):
         div_x = px + 8 + w + 4
         hazards = [_h_pillar_trig(c, div_x + 28, 150, 104, speed, pw=32),
                    _vt(px + pw + 150, 640, 50)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (70, 640), (1120, 640)
     elif slot == 2:  # valley-pit-bridge + triggered pillar on divider
         px = _vo(variant, [530, 550, 570])
         pw = 220
@@ -6243,20 +6634,21 @@ def v3_d21(c, kk, salt, slot, variant):
                             _h_pillar_per(div_x, 150, 104, 4.0, 0.0,
                                           650)]
         spawn, door = (70, 640), (1210 if x0 >= 200 else 1190, 640)
-    elif slot == 4:  # corridor-pit-bridge + triggered pillar
-        px = _vo(variant, [440, 480, 520])
-        plats = [_v3_ground(c, 0, px)] + _bridge(px) + [
-                 _v3_ground(c, px + pw, 1280)]
+    elif slot == 4:  # corridor-pit-bridge at 600 + periodic pillar
+        px = 500
+        plats = [_v3_ground(c, 0, 300),
+                 _vm(c, 300, 600, 80), _vm(c, 380, 600, 120)] +             _bridge(px, top=600, div_w=60, div_h=120) + [
+                 _vm(c, px + pw, 600, 120),
+                 _v3_ground(c, px + pw + 120, 1280)]
         plats += _vwalls(c, [300, 420])
         div_x = px + 8 + w + 4
-        hazards = [_h_pillar_trig(c, div_x + 28, 150, 104, speed, pw=32),
-                   _vt(px + pw + 150, 640, 50), _vtd(450, 496, 60)]
-        spawn, door = (70, 640), (1190, 640)
+        hazards = [_h_pillar_per(div_x, 150, 104, 3.6, 0.0, 650),
+                   _vt(px + pw + 230, 640, 50), _vtd(450, 436, 60)]
+        spawn, door = (70, 640), (1150, 640)
     else:  # slot 5: terrace-pit-bridge at 560 + PERIODIC pillar
         px = 640
         plats = [_v3_ground(c, 0, 400),
-                 _vm(c, 400, 600, 80), _vm(c, 480, 560, 160)] + \
-            _bridge(px, top=560, div_h=160) + [
+                 _vm(c, 400, 600, 80), _vm(c, 480, 560, 160)] +             _bridge(px, top=560, div_h=160) + [
                  _vm(c, px + pw, 560, 160),
                  _vm(c, px + pw + 160, 600, 80),
                  _v3_ground(c, px + pw + 240, 1280)]
@@ -6264,39 +6656,26 @@ def v3_d21(c, kk, salt, slot, variant):
         div_x = px + 8 + w + 4
         hazards = [_h_pillar_per(div_x, 150, 104, 3.6, 0.0, 650),
                    _vt(540, 560, 40), _vt(px + pw + 60, 560, 40)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (70, 640), (1210, 640)
     return plats + [_fp(c)], hazards, spawn, door, skel
 
 
 # ---------------------------------------------------------------------------
 # D22 gauntlets -- strip/column runs, spike-family (NO saws: legacy
 # b_gauntlets mixed static saws in; rule 11 forbids them here).
+# v1.0.7 variety redesign (lane B2): S4 was a flat gauntlet
+# identical to S1 except for a second pair + down-teeth; it is now
+# a raised walkway gauntlet (pairs on a 560 walkway). Doors move.
+# S1/S2/S3/S5 geometry unchanged.
 # ---------------------------------------------------------------------------
 
 def v3_d22(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[22][slot]
     _GKEY[0:3] = [22, slot, variant]
-    # Part B: TWIN COLUMNS + popup timing. Two 26px columns 20px
-    # apart (pair spans 72px) are cleared in ONE jump arc (span 87
-    # < 89.07), and a periodic popup strip sits >=100px past the
-    # pair's landing, so the hero must jump the pair and then time
-    # the popup -- simultaneous column-pair + timing, no saws.
-    # (Rule 11 forbids saws in D22, so the audit's "saw on top of a
-    # column" is unbuildable under the frozen checker; a saw on top
-    # would also sit above the jump apex for any column height > 0.)
-    # Ramp (slot-indexed): pair count [1,1,2,2,2], popup period
-    # shortens across slots 1->5.
     pop_period = [3.4, 3.0, 3.0, 2.6, 2.6][slot - 1]
     pop_on = [1.6, 1.4, 1.4, 1.2, 1.2][slot - 1]
 
     def _pair(x, top):
-        # 24-tall columns, 6px gap (pair spans 58px): a 36-tall
-        # pair is UNJUMPABLE -- the jump's above-36 span is only
-        # 54px < the 72px pair, so the feet clip the second column
-        # (autopilot 0/7). The above-24 span is 68px > 58px (10px
-        # margin); the span test passes (41 <= 65.5). Non-standard
-        # height, recorded honestly: 36 is the single-column
-        # standard, 24 is what a jumpable pair needs.
         return [_vcol(x, 24, 26, top=top),
                 _vcol(x + 32, 24, 26, top=top)]
 
@@ -6306,39 +6685,37 @@ def v3_d22(c, kk, salt, slot, variant):
                    _h_popup(700, 640, 45, pop_period, 0.0, pop_on),
                    _h_col(880, 640),
                    _vt(1060, 640, 40)]
+        door = (1180, 640)
     elif slot == 2:  # valley: 1 twin pair + popup + single column
-        # The popup sits on the long exit ground (1000), NOT on the
-        # 80px valley mass: the pair jump commits the hero and it
-        # arrives at a popup 20px past a mass edge at a random phase
-        # (ablation: pair-alone and popup-alone both pass, together
-        # they fail). On the long ground the hero can wait and time it.
         plats, spawn, door = _r_valley(c, variant)
         hazards = _pair(640, 640) + [
                    _h_popup(1000, 560, 45, pop_period, 0.0, pop_on),
                    _h_col(1100, 560)]
     elif slot == 3:  # stairs: twin pair on the plateau + popup
-        # The pair starts at x0+432 (the landing zone's end):
-        # the second probe-jump must land ON the plateau with room
-        # past the pair AND before its edge. At x0+440/x0+464 the
-        # second jump lands on/near the pair's right edge when the
-        # first jump runs short (ablation: PAIRONLY fails for V2).
         plats, spawn, door, x0 = _r_stairs32(c, variant)
         hazards = _pair(x0 + 432, 512) + [
                    _h_popup(x0 + 580, 544, 40, pop_period, 0.7,
                             pop_on),
                    _vt(1080, 640, 40)]
-    elif slot == 4:  # corridor: 2 twin pairs + popup + down-teeth
-        plats, spawn, door = _r_flat(c, beams=(300, 420))
-        hazards = _pair(480, 640) + [
-                   _h_popup(700, 640, 45, pop_period, 0.0, pop_on)] \
-                   + _pair(880, 640) + [
-                   _vt(1060, 640, 40),
-                   _vtd(450, 496, 60), _vtd(950, 496, 60)]
+        door = (1210, 640)
+    elif slot == 4:  # corridor: 2 twin pairs on a raised walkway
+        plats = [_v3_ground(c, 0, 320),
+                 _vm(c, 320, 600, 80),
+                 _vm(c, 400, 560, 480),
+                 _vm(c, 880, 600, 80),
+                 _v3_ground(c, 960, 1280)]
+        plats += _vwalls(c, [300, 420])
+        hazards = _pair(480, 560) + [
+                   _vt(200, 640, 40)] + _pair(720, 560) + [
+                   _h_popup(1020, 640, 45, pop_period, 0.0, pop_on),
+                   _vtd(450, 436, 60), _vtd(950, 436, 60)]
+        spawn, door = (70, 640), (1190, 640)
     else:  # slot 5: terraces, 2 twin pairs + strips
         plats, spawn, door, bx = _r_terraces(c, variant)
         hazards = _pair(bx + 300, 560) + [
                    _vt(bx + 60, 600, 40)] + _pair(bx + 540, 520) + [
                    _vt(bx + 760, 600, 40)]
+        door = (1150, 640)
     return plats + [_fp(c)], hazards, spawn, door, skel
 
 
@@ -6381,12 +6758,22 @@ def v3_d23(c, kk, salt, slot, variant):
                    _vt(x0 + 470, 512, 40),
                    _h_pillar_per(1080, py, ph, pil_period, phase, 650),
                    _h_popup(1075, 640, 45, pop_period, 0.7, pop_on)]
-    elif slot == 4:  # corridor: popup + pillar-with-popup-under-it
-        plats, spawn, door = _r_gap2(c, variant, "dashed", "dashed")
-        hazards = [_h_popup(520, 640, 45, pop_period, 0.0, pop_on),
+    elif slot == 4:  # corridor: raised walkway [480,760] top 600
+        # (v107: was _r_gap2, identical floor to S1). First popup
+        # sits on the walkway (top 600); pillar + its popup stay on
+        # the 640 ground at 900/895 (pillar landing must stay on
+        # 640: on a 600 top the landed block would be buried).
+        plats = [_v3_ground(c, 0, 480), _vm(c, 480, 600, 280),
+                 _v3_ground(c, 760, 1280)] + _vwalls(c, [300, 420])
+        spawn, door = (70, 640), (1150, 640)
+        hazards = [_h_popup(520, 600, 45, pop_period, 0.0, pop_on),
                    _vtd(450, 496, 60),
-                   _h_pillar_per(900, py, ph, pil_period, phase, 650),
-                   _h_popup(895, 640, 45, pop_period, 0.7, pop_on)]
+                   # F4 (lane F4, 2026-11-22): pillar 900 ->
+                   # 1000 (popup below moves with it, 895 ->
+                   # 995). L110/L113 shared (900,130,60,104);
+                   # only the period differed (4.4 vs 3.6).
+                   _h_pillar_per(1000, py, ph, pil_period, phase, 650),
+                   _h_popup(995, 640, 45, pop_period, 0.7, pop_on)]
     else:  # slot 5: terraces, popups + pillar-with-popup-under-it
         plats, spawn, door, bx = _r_terraces(c, variant)
         hazards = [_h_popup(bx + 60, 600, 40, pop_period, 0.0, pop_on),
@@ -6394,6 +6781,7 @@ def v3_d23(c, kk, salt, slot, variant):
                                  650),
                    _h_popup(bx + 355, 560, 45, pop_period, 0.7, pop_on),
                    _vt(bx + 790, 600, 40)]
+        door = (1170, 640)  # v107: door x moves (S4 1150, S5 1170)
     return plats + [_fp(c)], hazards, spawn, door, skel
 
 
@@ -6430,8 +6818,12 @@ def v3_d24(c, kk, salt, slot, variant):
     phase = _vo(variant, [0.0, 0.5, 1.0])
     if slot == 1:  # flat: triggered 600 + periodic 630 (overlap 630-640)
         plats, spawn, door = _r_flat(c)
-        hazards = [_h_pillar_trig(c, 600, py, ph, trig_speed),
-                   _h_pillar_per(630, py, ph, pil_period, phase, 650),
+        # F4 (lane F4, 2026-11-22): pair 600/630 -> 460/490
+        # (+30 overlap kept). L115/L118 shared the pair
+        # (600,130,40,104)+(630,130,60,104). Flat ground;
+        # popup at 750 stays 200 px clear; trigger 283->171.
+        hazards = [_h_pillar_trig(c, 460, py, ph, trig_speed),
+                   _h_pillar_per(490, py, ph, pil_period, phase, 650),
                    _vt(1020, 640, 40), _h_popup(750, 640, 35, 3.0, 0.0, 1.4)]
     elif slot == 2:  # valley: triggered 520 + periodic 550
         plats, spawn, door = _r_valley(c, variant)
@@ -6450,8 +6842,12 @@ def v3_d24(c, kk, salt, slot, variant):
                                            trig_speed),
                             _h_pillar_per(x0 + 882, py, ph, pil_period,
                                           phase, 650)]
-    elif slot == 4:  # corridor: triggered 600 + periodic 630
-        plats, spawn, door = _r_flat(c, beams=(320, 440))
+    elif slot == 4:  # corridor: dashed stone + triggered 600 +
+        # periodic 630 (v107: was flat+beams, floor identical to S1)
+        plats = [_v3_ground(c, 0, 300),
+                 _vdash(300, 640, 120, 3.0, 0.0, 2.0),
+                 _v3_ground(c, 420, 1280)] + _vwalls(c, [320, 440])
+        spawn, door = (70, 640), (1150, 640)
         hazards = [_h_pillar_trig(c, 600, py, ph, trig_speed),
                    _h_pillar_per(630, py, ph, pil_period, phase, 650),
                    _vtd(450, 496, 60), _h_popup(750, 640, 35, 3.0, 0.0, 1.4)]
@@ -6518,12 +6914,22 @@ def v3_d25(c, kk, salt, slot, variant):
         hazards = strips + [_vt(x0 + 470, 512, 40),
                             _h_pillar_per(1080, py, ph, period, phase,
                                           650)]
-    elif slot == 4:  # corridor-forest
-        plats, spawn, door = _r_flat(c, beams=(300, 420))
+    elif slot == 4:  # corridor-forest: dashed stone + 3 pillars
+        # (v107: was flat+beams, floor identical to S1)
+        plats = [_v3_ground(c, 0, 180),
+                 _vdash(180, 640, 120, 3.0, 0.0, 2.0),
+                 _v3_ground(c, 300, 1280)] + _vwalls(c, [300, 420])
+        spawn, door = (70, 640), (1150, 640)
         hazards = [_h_pillar_trig(c, 360, py, ph, 800),
                    _h_pillar_per(620, py, ph, period, phase, 650),
-                   _h_pillar_trig(c, 900, py, ph, 800),
-                   _vtd(450, 496, 60), _h_col(740, 640)]
+                   # F4 (lane F4, 2026-11-22): trig pillar 900
+                   # -> 980 (column below moves too, 740 ->
+                   # 820). L120/L123 shared the column AND
+                   # the pillar set 360/620/900. Column-jump
+                   # landing ~860-870, ~110 px run-up to the
+                   # moved block (980..1020); trigger 691.
+                   _h_pillar_trig(c, 980, py, ph, 800),
+                   _vtd(450, 496, 60), _h_col(820, 640)]
     else:  # slot 5: terrace-forest
         plats, spawn, door, bx = _r_terraces(c, variant)
         # Lane C: NO column here. A column at 1000 sits 20-40px
@@ -6570,7 +6976,7 @@ def v3_d26(c, kk, salt, slot, variant):
     if slot == 1:  # flat: pier at 400
         plats, saw = _pb_saw_pier(c, 400, r, dp, don)
         hazards = [_vt(280, 640, 40), saw, _vt(900, 640, 40)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (70, 640), (1210, 640)  # v107: door x moves
     elif slot == 2:  # valley: saw on the valley floor [480,800],
         # the [800,880] mass (top600) becomes the dashed stone.
         plats, spawn, door = _r_valley(c, variant)
@@ -6593,10 +6999,11 @@ def v3_d26(c, kk, salt, slot, variant):
         # landing before the mass ends -- UNREACHABLE).
         hazards = [_h_saw(x0 + 472, 512, r),
                    _vt(x0 + 696, 576, 40), _vt(1080, 640, 40)]
-    elif slot == 4:  # corridor: pier at 400, beams (340,440)
-        plats, saw = _pb_saw_pier(c, 400, r, dp, don, beams=(340, 440))
+    elif slot == 4:  # corridor: pier at 640 (v107: was 400,
+        # identical to S1), beams (340,440); tail strip at 1080
+        plats, saw = _pb_saw_pier(c, 640, r, dp, don, beams=(340, 440))
         hazards = [_vt(280, 640, 40), saw, _vtd(450, 496, 60),
-                   _vt(900, 640, 40)]
+                   _vt(1080, 640, 40)]
         spawn, door = (70, 640), (1190, 640)
     else:  # slot 5: gap route, pier on the tail ground [740,1280]
         plats, spawn, door = _r_gap2(c, variant, "dashed", "falling")
@@ -6670,27 +7077,39 @@ def v3_d27(c, kk, salt, slot, variant):
     elif slot == 2:  # valley approach (dips to 600 before the pit)
         plats, hazards = _pb_elevator(c, lx, mp, [980, 1075])
         plats = [_vm(c, 0, 560, 320), _vm(c, 320, 600, 80)] + plats
-    elif slot == 3:  # stairs approach (climbs to 512, drops to pit)
+    elif slot == 3:  # shaft approach (v107: was stairs, same as
+        # no other slot -- a shaft drop to the pit floor, then the
+        # lift). Left mass top 440, shaft [248,352] to floor 660.
         plats, hazards = _pb_elevator(c, lx, mp, [980, 1075])
-        plats = [plat(0, 608, 96, 112, "solid"),
-                 plat(96, 576, 96, 144, "solid"),
-                 plat(192, 544, 96, 176, "solid"),
-                 plat(288, 512, 112, 208, "solid")] + plats
-    elif slot == 4:  # corridor approach: flat + a column, 3 ledge
-        # strips. (Low beams (340,440) are unusable here: the 440
-        # beam spans the full width at the ledge's height and seals
-        # the pocket.)
+        # F3 (lane F3, 2026-11-22): second ledge strip 40 -> 60
+        # px wide (x 1075, top 440 unchanged). L131/L132
+        # shared the byte-identical static-spike pair
+        # (980,430)+(1075,430); widening this one strip in
+        # L132 only makes D27's primary vary per slot.
+        # Ends 1135, still 35 px clear of the 1170 door
+        # safe-zone edge (door 1210); strip-1 gap unchanged.
+        hazards = [_vt(980, 440, 40), _vt(1075, 440, 60)]
+        plats = [_vm(c, 0, 440, 200),
+                 plat(200, 440, 48, 220, "solid"),
+                 plat(352, 440, 48, 220, "solid"),
+                 _vm(c, 248, 660, 152)] + plats
+    elif slot == 4:  # corridor approach: raised walkway top 600
+        # (v107: was flat 640, same floor as S1) + a column, 3 ledge
+        # strips. Hero drops 40 from the walkway onto the mover.
         plats, hazards = _pb_elevator(c, lx, mp, [980, 1075])
-        plats = [_v3_ground(c, 0, lx)] + plats
-        hazards = [_vt(300, 640, 40), _h_col(200, 640)] + hazards
+        plats = [_v3_ground(c, 0, lx, top=600)] + plats
+        hazards = [_vt(300, 600, 40), _h_col(200, 600)] + hazards
     else:  # slot 5: terraces approach (rises to 520, drops to pit)
         plats, hazards = _pb_elevator(c, lx, mp, [980, 1075])
         plats = [_vm(c, 0, 600, 160), _vm(c, 160, 560, 160),
                  _vm(c, 320, 520, 80)] + plats
         hazards = [_vt(120, 600, 40)] + hazards
-    spawn = {1: (70, 640), 2: (90, 560), 3: (70, 608),
-             4: (70, 640), 5: (70, 600)}[slot]
-    return plats + [_fp(c)], hazards, spawn, (1190, 440), skel
+    spawn = {1: (70, 640), 2: (90, 560), 3: (90, 440),
+             4: (70, 600), 5: (70, 600)}[slot]
+    # v107: door x moves per slot (safe zone: ledge strips end 1115,
+    # so centres >= 1173; S2 1180 keeps 47px).
+    door_x = {1: 1190, 2: 1180, 3: 1210, 4: 1200, 5: 1175}[slot]
+    return plats + [_fp(c)], hazards, spawn, (door_x, 440), skel
 # ---------------------------------------------------------------------------
 # D30 skyline-city -- stepped skyline masses (tower + terraces).
 # ---------------------------------------------------------------------------
@@ -6706,11 +7125,12 @@ def _tower_cfg(slot, variant, t_opts, e_opts):
 def v3_d30(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[30][slot]
     _GKEY[0:3] = [30, slot, variant]
-    if slot in (1, 3, 5):
+    if slot in (1, 3):
         cfg = _tower_cfg(slot, variant, [170, 180, 190],
                          [780, 820, 860])
-        if slot == 5:
-            cfg["mirror"] = True
+        if slot == 3:  # tall tower (v107: was same params as S1)
+            cfg["T"] = [140]; cfg["S"] = [120]; cfg["E1"] = [700]
+            cfg["G"] = [50]; cfg["padw"] = [150]
         plats, tops, E1, E2, PR, sx, dx = _v3_tower(
             c, kk, salt, cfg, dashed=False)
         # Popup ramp across the DESCENDING slots (1,3,5):
@@ -6722,13 +7142,7 @@ def v3_d30(c, kk, salt, slot, variant):
         def _pop(x, top, w=35):
             return _h_popup(x, top, w, pop_p, 0.0, pop_on)
 
-        if slot == 5:
-            pops = [_pop(882, tops[0]), _pop(965, tops[0]),
-                    _pop(882, tops[2]), _pop(965, tops[2])]
-            hazards = pops + [_vcol(600, 36, 26, top=tops[0]),
-                              _vt(682, 640, 35), _vt(765, 640, 35),
-                              _vt(500, 640, 50)]
-        elif slot == 3:
+        if slot == 3:
             pops = [_pop(240, tops[0], 40), _pop(328, tops[0], 40),
                     _pop(300, tops[2], 35)]
             hazards = pops + [_vt(520, tops[0], 50),
@@ -6745,6 +7159,21 @@ def v3_d30(c, kk, salt, slot, variant):
                               _vt(240, 640, 35), _vt(323, 640, 35),
                               _vcol(700, 36, 26)]
         return plats + [_fp(c)], hazards, (sx, tops[0]), (dx, 640), skel
+    if slot == 5:  # skyline-valley (v107: was mirror tower, same
+        # shape as S1/S3): 4 popups + column on the valley floor
+        plats, spawn, door = _r_valley(c, variant)
+        hazards = [_h_popup(520, 640, 35, 2.6, 0.0, 1.2),
+                   _h_popup(640, 640, 35, 2.6, 0.7, 1.2),
+                   _h_popup(1000, 560, 35, 2.6, 0.0, 1.2),
+                   _h_popup(1100, 560, 35, 2.6, 0.7, 1.2)]
+        door = (1210, 560)  # v107: popup at 1100 ends 1135
+        return plats + [_fp(c)], hazards, spawn, door, skel
+    if slot == 4:  # skyline-stair (v107: was terraces, same as S2):
+        # strips on the steps + plateau column + exit strip
+        plats, spawn, door, x0 = _r_stairs32(c, variant)
+        _rects, strips = _vstairs_teeth(c, x0, n=4)
+        hazards = strips + [_h_col(x0 + 470, 512), _vt(1080, 640, 40)]
+        return plats + [_fp(c)], hazards, spawn, door, skel
     plats, spawn, door, bx = _r_terraces(c, variant)
     # Lane C: popup on the 560 mass at bx+480 (|bx+497-(bx+313)|=184
     # <= 300: (column, spike_popup) survives; the D22 spacing -- the
@@ -6758,6 +7187,8 @@ def v3_d30(c, kk, salt, slot, variant):
                _h_col(bx + 300, 560),
                _h_popup(bx + 480, 560, 35, 3.0, pop_phase, 1.4),
                _vt(bx + 600, 520, 40), _vt(bx + 810, 600, 40)]
+    if slot == 2:  # v107: door x moves (strip at bx+810 ends <=1090)
+        door = (1170, 640)
     return plats + [_fp(c)], hazards, spawn, door, skel
 # ---------------------------------------------------------------------------
 # D32 zigzag-descents -- alternating tower descents (mirror zigzag).
@@ -6785,14 +7216,30 @@ def _pb_alt_tower(c, kk, salt, cfg, dash_period, dash_on):
 def v3_d32(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[32][slot]
     _GKEY[0:3] = [32, slot, variant]
-    cfg = _tower_cfg(slot, variant, [175, 185, 195],
-                     [800, 840, 760])
+    # v107: tower params amplified per slot (was +/-10-20px).
+    _v107_d32_cfg = {
+        1: ([175, 185, 195], [800, 840, 760], None),
+        2: ([200, 210, 190], [780, 820, 800], None),
+        3: ([150, 160, 155], [880, 900, 860], 120),
+        4: ([260, 270, 265], [820, 840, 800], 70),
+        5: ([185, 195, 190], [840, 860, 820], None)}[slot]
+    cfg = _tower_cfg(slot, variant, _v107_d32_cfg[0], _v107_d32_cfg[1])
+    if _v107_d32_cfg[2] is not None:
+        cfg["S"] = [_v107_d32_cfg[2]]  # tall (S3) / stepped (S4)
     if slot in (2, 4):
         cfg["mirror"] = True
     dp = [3.2, 3.0, 3.0, 2.8, 2.8][slot - 1]
     don = [2.2, 2.0, 2.0, 1.8, 1.8][slot - 1]
     plats, tops, E1, E2, PR, sx, dx = _pb_alt_tower(
         c, kk, salt, cfg, dp, don)
+    if slot == 3:  # side-shaft: second flank column (channel 192-240)
+        plats.append(plat(240, tops[0] + 20, 48,
+                          c.floor_y - (tops[0] + 20), "solid"))
+    if slot == 5:  # corridor floors: side walls enclose the tower;
+        # spawn/door move inside (door 1130, clear of col 700)
+        plats += [plat(48, tops[0], 48, c.floor_y - tops[0], "solid"),
+                  plat(1184, tops[0], 48, c.floor_y - tops[0], "solid")]
+        sx, dx = 120, 1130
     if cfg.get("mirror"):
         hazards = [_vt(882, tops[0], 35), _vt(965, tops[0], 35),
                    _vcol(600, 36, 26, top=tops[0]),
@@ -6820,68 +7267,140 @@ def v3_d32(c, kk, salt, slot, variant):
                    _vcol(700, 36, 26)]
     return plats + [_fp(c)], hazards, (sx, tops[0]), (dx, 640), skel
 # ---------------------------------------------------------------------------
-# D33 vertical-patrol -- Lane C4 (route (a), 2026-11-20): redesign.
-# Vertical patrol saw (vpatrol2 geometry, UNCHANGED) over an EMPTY 60 px
+# D33 vertical-patrol -- Lane C4 (route (a), 2026-11-20) + Lane F2
+# (2026-11-22, hard-check fix). Vertical patrol saw over an EMPTY 60 px
 # gap -- the ground-pass-blocking fixture. Declared primary
 # {saw_path, spike_popup, gap}, demo pair.
 #
 # Why this geometry (S7 fix, measured):
-# - Floors [0,620] + [680,1280], top 640; gap [620,680] directly under
-#   the disc column (disc x 618-662). NO bridge, NO stone under the gap:
-#   the D10 stone (53 px at y656) is deliberately OMITTED -- for a
-#   vertical patrol the hero can stand on it (head 617) under the HIGH
-#   disc (bottom 522, 95 px clear) and walk the disc centre-x on the
+# - Floors [0,gx] + [gx+60,1280], top 640; gap [gx,gx+60] directly
+#   under the disc column. NO bridge, NO stone under the gap: the D10
+#   stone (53 px at y656) is deliberately OMITTED -- for a vertical
+#   patrol the hero can stand on it (head 617) under the HIGH disc
+#   (bottom 522, 95 px clear) and walk the disc centre-x on the
 #   ground, which is exactly the S7 ground pass (R3 fixture bridge:
 #   autopilot exec 681.55). With an empty gap, walking under the disc
 #   means walking into a 60 px hole (probe walk phase + solver run
 #   segment both fail it); the ONLY crossing is the jump.
-# - Saw fixed at 640 in every slot, matching the filed vpatrol2 fixture
-#   (saw (640,618)->(640,500), r22, T3.0, sine ease), so ONE probe +
-#   ONE centre covers all 5 slots. The centre is RE-DERIVED by a fresh
-#   probe on this geometry -- the old (600.55, 1.3083) is NOT carried
-#   forward on faith.
+# - F2 (+ coordinator steer 22 Nov 00:52: obstacles AND levels, smallest
+#   detail to biggest -- the PRIMARY obstacle must vary, not just the
+#   floor): the gap MOVES per slot (gx 340/500/660/820/980) and the saw
+#   moves WITH it over the gap CENTRE (cx=gx+30), AND the saw GROWS per
+#   slot: r 22/24/26/28/30, rest y = 640-r (the disc bottom kisses the
+#   floor top at rest, as r22 does at 618), path top (cx,500), T3.0.
+#   The B3 build kept the gap at [620,680] and the saw at 640 in every
+#   slot, so all 5 slots were the same level modulo jitter -- the hard
+#   check failed D33 variety. The C4 fixture's purpose is the BLOCK, not
+#   the exact x: a 60 px gap at any x blocks the ground pass, and the
+#   joint floor (probe_d33.py, gap-jump adaptation of the B1F probe)
+#   re-proves every slot on both grids. Saw period stays 3.0: T2.0 was
+#   A/B-tested on S3 and is tighter (Wt 0.517 vs 0.817 normal, 0.283 vs
+#   0.50 nightmare, 1 death vs 0) with no benefit, so the proven 3.0
+#   stays; the RADIUS is the varied dimension. S5's r30 is the
+#   playlist's giant saw, evaluated not assumed: the checker's 0.7 s
+#   entry-clear window at the gap takeoff is ~1.78 s (sine ease; the
+#   disc only overlaps the takeoff stance while it is low) and the
+#   joint-floor clearance ~14 px vs the 4.05 floor.
 # - No repair-rail risk: _repair_saws skips path saws with |y2-cy| > 8
 #   (ours is 118), so nothing can bridge the gap.
-# - Third kind on the LANDING platform only: one popup strip per level
-#   (_h_popup, w35, T3.0, on_time 1.4 -> entry-clear 1.6 s >= 0.7 s).
-#   A popup on the approach platform would touch the saw segment's band
-#   and make the checker's mixed move INAPPLICABLE (saw+popup mixes are
-#   UNFILED). Popup kw x = px+17.5; saw kw x = 662; |diff| 135.5-215.5
-#   <= 300 in every slot, so the (saw, spike_popup) pair is in-window.
-#   NO approach strip (D10 lesson: it can kill the autopilot via
-#   solver ok=false at the early stance).
-# - Slots vary by popup x/phase + palette + _fp pillar only.
+# - Popup strips vary in COUNT (2/2/1/2/1), WIDTH (30-50), PHASE and
+#   ON_TIME (1.0-1.8, T3.0): S1 560w40/phi0.0/on1.2 + 920w30/phi1.2/on1.6,
+#   S2 340w45/phi0.6/on1.2 + 760w35/phi1.8/on1.4, S3 880w50/phi1.2/on1.8,
+#   S4 600w30/phi0.0/on1.2 + 1020w35/phi1.8/on1.2, S5 700w50/phi2.4/on1.2.
+#   F2 puts strips before the gap in S2 (340), S4 (600) and S5 (700) as
+#   well as after it: the D10 "no approach strip" lesson does not apply
+#   here, because the saw hangs over the GAP, not over the approach
+#   platform -- the approach strip is a separate chained jump in the
+#   run-in (B1F probe chain), and the autopilot passes both slots on
+#   strategy 0 with 0 deaths. S5's strip sits BEFORE the gap because an
+#   after-gap strip cannot fit between the gap landing and the door safe
+#   zone (checker: 40 px). Popup kw x and saw kw x stay in-window
+#   (|diff| <= 300) in every slot.
+# - Slots vary by gap x, saw x AND radius, popup count/width/phase/
+#   on_time/side, door x (all five distinct: 1150/1130/1080/1190/1210),
+#   upper-beam step height + strut position, lower-beam height, and _fp
+#   pillar. The floor profile differs in every pair; the obstacle
+#   choreography reads differently at a glance in every slot.
+def _v107_d33_walls(c, cx, beam_up, beam_low):
+    """Stepped UPPER beam (v107 F2): the step sits over the saw
+    (x=cx), joined by a strut [cx-24, cx+24] from the upper beam
+    down to the (full-width) lower beam. The saw's high centre
+    (cx,500) is unchanged in every slot; the disc overlaps the lower
+    beam visually at the top of its travel (hazard z10 over platform
+    z0), no gameplay effect. Strut bottom = beam_low clears the jump
+    head apex (544) by >= 34 px (beam bottom <= 510)."""
+    return [plat(48, beam_up, cx - 72, 16, "solid"),
+            plat(cx + 24, beam_up + 16, 1232 - cx - 24, 16, "solid"),
+            plat(48, beam_low, 1184, 16, "solid"),
+            plat(cx - 24, beam_up, 48, beam_low - beam_up, "solid"),
+            plat(0, 150, 48, 570, "solid"),
+            plat(1232, 150, 48, 570, "solid"),
+            plat(1232, 600, 48, 120, "solid")]
+
+
 def v3_d33(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[33][slot]
     _GKEY[0:3] = [33, slot, variant]
-    px = [800, 840, 780, 860, 820][slot - 1]
-    phase = [0.0, 0.6, 1.2, 1.8, 2.4][slot - 1]
-    # Lower-beam height varies per slot (genuine layout dim: S1 and S5
-    # share the same _fp pillar, so without it they differ in only one
-    # signature dim and read as duplicates). Every height keeps the
-    # high sweep centre (640,500) within r+GROUND_TOL = 26 px of the
-    # beam (distances 0/22/0/14/0) and keeps >= 34 px head clearance
-    # under the beam (arc head apex 544 vs beam bottom <= 510).
-    beam_low = [478, 462, 494, 470, 486][slot - 1]
-    plats = [floor_seg(c, 0, 620, top=640),
-             floor_seg(c, 680, 1280, top=640)] + _laneC_walls(c, beam_low=beam_low)
-    hazards = [saw_path(640, 618, 640, 500, 3.0, 22),
-               _h_popup(px, 640, 35, 3.0, phase, 1.4)]
-    return plats + [_fp(c)], hazards, (70, 640), (1190, 640), skel
+    # v1.0.7 lane F2 (hard-check fix + coordinator steer 22 Nov 00:52):
+    # REAL variety -- obstacles AND levels, smallest detail to biggest.
+    # The B3 build kept the ground floor, saw and spawn IDENTICAL in all
+    # 5 slots (door +/-30px, popup phase and beam +/-16px jitter only) --
+    # the hard check failed D33 variety, and a naive signature metric
+    # would pass the B3 slots anyway (one 35px strip shuffling +/-40px),
+    # so the PRIMARY obstacle must vary. The 60px ground-pass-blocking
+    # gap MOVES per slot (the C4 fixture's purpose is the block, not the
+    # exact x=620-680), the path saw moves WITH it over the gap centre,
+    # AND the saw GROWS per slot: r 22/24/26/28/30, rest y = 640-r (disc
+    # bottom kisses the floor top at rest, as r22 does at 618), path top
+    # (cx,500), T3.0 (T2.0 was A/B-tested on S3 and is tighter with no
+    # benefit, so the proven 3.0 stays; the radius is the varied
+    # dimension). S5's r30 is the playlist's giant saw, evaluated: the
+    # checker's 0.7s entry-clear window at the gap takeoff is ~1.78s and
+    # the joint-floor clearance ~14px vs the 4.05 floor -- re-proven per
+    # slot by probe_d33.py on both grids. Popup strips vary in COUNT
+    # (2/2/1/2/1), WIDTH (30-50), PHASE and ON_TIME (1.2-1.8)  # F5: was 1.0-1.8; 1.0 raised to 1.2. Doors all
+    # distinct (1150/1130/1080/1190/1210). Type set {saw_path,
+    # spike_popup, gap} kept. S5's strip sits BEFORE the gap (700): an
+    # after-gap strip cannot fit between the gap landing and the door
+    # safe zone.
+    gx = [340, 500, 660, 820, 980][slot - 1]
+    cx = gx + 30
+    saw_r = [22, 24, 26, 28, 30][slot - 1]
+    saw_y = 640 - saw_r
+    door_x = [1150, 1130, 1080, 1190, 1210][slot - 1]
+    beam_up = [260, 300, 340, 280, 320][slot - 1]
+    beam_low = [470, 486, 462, 490, 478][slot - 1]
+    # F5 (2026-11-22, Skeptic FINDING-1 follow-up): the three 1.0
+    # on_time values below were 1.0; nightmare x0.8 -> 0.8 < 0.9 minimum
+    # (DASHED_MIN_ON), a schema violation logged on L161/L163/L164.
+    # Raised to 1.2 so nightmare gives 0.96 >= 0.9, meeting nightmare.gd's
+    # documented 1.20s assumption exactly. Longer up-time = harder, so
+    # the joint floor + autopilot were re-proved, not assumed.
+    strips = {1: [(560, 40, 0.0, 1.2), (920, 30, 1.2, 1.6)],
+              2: [(340, 45, 0.6, 1.2), (760, 35, 1.8, 1.4)],
+              3: [(880, 50, 1.2, 1.8)],
+              4: [(600, 30, 0.0, 1.2), (1020, 35, 1.8, 1.2)],
+              5: [(700, 50, 2.4, 1.2)]}[slot]
+    plats = [floor_seg(c, 0, gx, top=640),
+             floor_seg(c, gx + 60, 1280, top=640)] + \
+        _v107_d33_walls(c, cx, beam_up, beam_low)
+    hazards = [saw_path(cx, saw_y, cx, 500, 3.0, saw_r)] + \
+        [_h_popup(sx, 640, w, 3.0, phase, on)
+         for (sx, w, phase, on) in strips]
+    return plats + [_fp(c)], hazards, (70, 640), (door_x, 640), skel
 
 
 # ---------------------------------------------------------------------------
-# D34 trigger-pits -- triggered strips + falling stones (greedy-friendly:
-# triggered spikes armed >= 160px ahead, widest stones, longest stand).
+# D34 trigger-pits -- v1.0.7 variety redesign (lane B4).
+# Mechanic FROZEN (Part B): mover pit + triggered strips (+ periodic
+# pillar over the pit, Lane C). Ramp FROZEN: mover period
+# [3.2,3.0,3.0,2.8,2.8]; triggered lead [220,210,200,190,180]; S3 pit
+# 120w (80w mover + 40px sweep). The pit/pillar/strip RELATIVE geometry
+# is the proven shipped geometry in every slot; only the surrounding
+# floor shape changes per the VARIETY-PLAN skeleton table.
 # ---------------------------------------------------------------------------
 
 def v3_d34(c, kk, salt, slot, variant):
-    # Lane C: a periodic pillar over each mover pit. The pillar
-    # drops into the pit (its down rect [616,720] blocks the
-    # mover's path), so the hero must time the crossing -- the
-    # trigger pit + pillar is the {spike_trig, pillar_periodic}
-    # pair. Pillar top 400 (its bottom 504 is above the hero's
-    # head 601 when UP), period 3.6, phase 0.0.
     skel = V3_SKELETONS[34][slot]
     _GKEY[0:3] = [34, slot, variant]
     mp = [3.2, 3.0, 3.0, 2.8, 2.8][slot - 1]
@@ -6890,7 +7409,11 @@ def v3_d34(c, kk, salt, slot, variant):
     def _trig(x, w=40):
         return _h_trig(x, 640, w, lead=lead, delay=0.35)
 
-    if slot == 1:  # flat + mover pit
+    def _pillar(mx):
+        # Periodic pillar over the mover pit (drops into the pit).
+        return _h_pillar_per(mx + 30, 400, 104, 3.6, 0.0, 650)
+
+    if slot == 1:  # flat + mover pit (shipped geometry, unchanged)
         mx = _vo(variant, [440, 480, 520])
         plats = [_v3_ground(c, 0, mx),
                  _vmov(mx, 640, 120, 120, 0, mp),
@@ -6898,59 +7421,60 @@ def v3_d34(c, kk, salt, slot, variant):
         hazards = [_trig(mx - 200), _trig(mx + 300),
                    _h_pillar_per(mx + 90, 400, 104, 3.6, 0.0, 650)]
         spawn, door = (70, 640), (1190, 640)
-    elif slot == 2:  # valley + mover pit in the valley floor
-        mx = 560
-        plats = [_vm(c, 0, 560, 320), _vm(c, 320, 600, 80),
-                 _vm(c, 400, 640, 80), _v3_ground(c, 480, mx),
-                 _vmov(mx, 640, 120, 120, 0, mp),
-                 _v3_ground(c, mx + 240, 1280)] + _vwalls(c, [320, 420])
-        hazards = [_trig(mx - 160), _vt(1000, 640, 40),
-                   _h_pillar_per(mx + 90, 400, 104, 3.6, 0.0, 650)]
-        spawn, door = (90, 560), (1190, 640)
-    elif slot == 3:  # stairs + mover pit on the exit ground
-        plats, spawn, door, x0 = _r_stairs32(c, variant)
-        # _r_stairs32 plats: [ground, 4 steps, plateau, 3 down-steps,
-        # ground] + walls. Replace the tail ground [x0+832,1280].
-        # The pit is the mover (120w) + its 60px sweep = 180w; with
-        # 48w of tail ground before it and >=48w of exit ground
-        # after it it needs 276w, so it fits for x0=120/160 but not
-        # x0=200 (248w) -- the generator picks a passing variant.
-        # Pit is the mover (80w) + its 40px sweep = 120w; with
-        # 48w of tail ground before it the exit ground starts at
-        # x0+1000, which is <=1172 (the door's left edge) for
-        # x0=160 but not x0=200 -- the generator picks a passing
-        # variant. The trigger sits on the entry ground (the
-        # plateau is at 512, so a y640 trigger there is embedded
-        # in the mass).
-        mx = x0 + 832 + 48
-        plats = plats[:9] + [
-            _v3_ground(c, x0 + 832, mx),
-            _vmov(mx, 640, 80, 40, 0, mp),
-            _v3_ground(c, mx + 120, 1280)] + _vwalls(c, [300, 380])
-        hazards = [_trig(110), _vt(x0 + 480, 512, 40),
-                   _h_pillar_per(mx + 30, 400, 104, 3.6, 0.0, 650)]
-    elif slot == 4:  # corridor + mover pit
-        mx = _vo(variant, [440, 480, 520])
-        plats = [_v3_ground(c, 0, mx),
-                 _vmov(mx, 640, 120, 120, 0, mp),
-                 _v3_ground(c, mx + 240, 1280)] + _vwalls(c, [340, 440])
-        hazards = [_trig(mx - 200), _trig(mx + 300), _vtd(450, 496, 60),
-                   _h_pillar_per(mx + 90, 400, 104, 3.6, 0.0, 650)]
-        spawn, door = (70, 640), (1190, 640)
-    else:  # slot 5: gap route + mover pit on the tail ground
+    elif slot == 2:  # gap route + mover pit on the tail ground
+        # (shipped S5 geometry, relabelled to the plan's gap slot)
         plats, spawn, door = _r_gap2(c, variant, "dashed", "falling")
-        # _r_gap2 tail ground is [740,1280]; put the mover pit there.
         plats = plats[:5] + [
             _v3_ground(c, 740, 800),
             _vmov(800, 640, 120, 120, 0, mp),
             _v3_ground(c, 1040, 1280)] + _vwalls(c, [300, 420])
-        # No strip: the 1080 strip sat in the exit ground's
-        # landing zone [1040,1088] (NOSTRIP ablation passes).
         hazards = [_h_col(180, 640), _trig(860),
                    _h_pillar_per(890, 400, 104, 3.6, 0.0, 650)]
+        spawn, door = (70, 640), (1150, 640)
+    elif slot == 3:  # valley + mover pit in the valley floor (120w pit)
+        mx = 560
+        plats = [_vm(c, 0, 560, 320), _vm(c, 320, 600, 80),
+                 _vm(c, 400, 640, 80), _v3_ground(c, 480, mx),
+                 _vmov(mx, 640, 80, 40, 0, mp),
+                 _v3_ground(c, mx + 120, 800),
+                 _vm(c, 800, 600, 80), _vm(c, 880, 560, 80),
+                 _vm(c, 960, 560, 320)] + _vwalls(c, [320, 420])
+        # F4 (lane F4, 2026-11-22): pillar _pillar(mx)=590 ->
+        # mx+60=620. L167/L168 shared (590,400,60,104) incl.
+        # period 3.6 / phase 0.0. 620..680 stays inside the
+        # mover pit [560,680] (right edge flush with the
+        # ground resuming at 680); same FLOOR_Y-720 landing.
+        hazards = [_trig(mx - 160), _vt(1080, 560, 40),
+                   _h_pillar_per(mx + 60, 400, 104, 3.6, 0.0, 650)]
+        spawn, door = (90, 560), (1190, 560)
+    elif slot == 4:  # corridor: 560 corridor floor with the mover pit
+        # in it (steps up 640->600->560, pit in the corridor, steps
+        # down to the 640 exit ground). Beams [449,380]: 449 clears
+        # the 560 corridor jump apex (469) by 20px.
+        mx = 560
+        plats = [_v3_ground(c, 0, 400),
+                 _vm(c, 400, 600, 80), _vm(c, 480, 560, 80),
+                 _vmov(mx, 560, 80, 40, 0, mp),
+                 _vm(c, mx + 120, 560, 120),
+                 _v3_ground(c, 800, 1280)] + _vwalls(c, [449, 380])
+        hazards = [_trig(mx - 200), _trig(mx + 300), _pillar(mx)]
+        spawn, door = (70, 640), (1110, 640)
+    else:  # slot 5: stairs + mover pit on the exit ground
+        # (shipped S3 geometry, relabelled to the plan's stair slot;
+        # x0 FIXED at 160: the _vd pick (120) puts the first step
+        # under the entry trig at 110, overlapping it by 30x10.)
+        x0 = 160
+        steps, _, _ = _vstairs_up(c, x0, 640, 4, tread=96, rise=32)
+        plats = [_v3_ground(c, 0, x0)] + steps + [_vm(c, x0 + 384, 512, 160)]
+        steps2, _, _ = _vstairs_down(c, x0 + 544, 544, 3, tread=96, rise=32)
+        plats += steps2
+        mx = x0 + 832 + 48
+        plats += [_v3_ground(c, x0 + 832, mx),
+                  _vmov(mx, 640, 80, 40, 0, mp),
+                  _v3_ground(c, mx + 120, 1280)] + _vwalls(c, [300, 380])
+        hazards = [_trig(110), _vt(x0 + 480, 512, 40), _pillar(mx)]
+        spawn, door = (70, 640), (1190, 640)
     return plats + [_fp(c)], hazards, spawn, door, skel
-# ---------------------------------------------------------------------------
-# D35 spike-forests -- dense strip forest, chained pairs at gap 55.
 # ---------------------------------------------------------------------------
 
 def _pb_teeth_zone(c, x0, top, n_clusters, cluster_w=40, gap=120):
@@ -6964,32 +7488,40 @@ def _pb_teeth_zone(c, x0, top, n_clusters, cluster_w=40, gap=120):
     return beam_top, teeth
 
 
+# ---------------------------------------------------------------------------
+# D35 spike-forests -- v1.0.7 variety redesign (lane B4).
+# Mechanic FROZEN (Part B): ceiling teeth at jump height over raised
+# ground (beam bottom 4px above the jump head apex) + strips/columns.
+# Ramp FROZEN: teeth clusters [2,2,3,3,4]; strip count [1,1,2,2,1].
+# S1 was a 560-plateau copy of S4; it is now a TRUE flat forest
+# (teeth over the 640 ground, beam 529). All other slots keep their
+# proven geometry; only S4's door moves (1150).
+# ---------------------------------------------------------------------------
+
 def v3_d35(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[35][slot]
     _GKEY[0:3] = [35, slot, variant]
     n_cl = [2, 2, 3, 3, 4][slot - 1]
-    if slot == 1:  # steps (rise 40) + plateau 560 [480,800] + teeth
-        plats = [_v3_ground(c, 0, 400),
-                 _vm(c, 400, 600, 80), _vm(c, 480, 560, 320),
-                 _v3_ground(c, 800, 1280)] + _vwalls(c, [449, 380])
-        _, teeth = _pb_teeth_zone(c, 500, 560, n_cl)
-        # Clusters at 500 and 660 (gap 120); strip in the gap at 580.
-        # Lane C: column at 300 on the clear 640 ground (|500-313|=187
-        # <= 300: (column, spike_down) survives; the column jump arc
-        # is clear of the teeth, which start at 500). Declared
-        # primary {spike_down, spike_up, column_floor}, demo pair.
-        hazards = teeth + [_vt(580, 560, 40), _h_col(300, 640)]
-        spawn, door = (70, 640), (1190, 640)
+    if slot == 1:  # flat forest: teeth over the flat 640 ground
+        # Beams [529,449,380]: 449 sits in y310..510 so the core-middle
+        # rule sees >= 2 rects (449 + 380); it clears every jump apex
+        # (head 549 vs beam bottom 465).
+        plats = [_v3_ground(c)] + _vwalls(c, [529, 449, 380])
+        _, teeth = _pb_teeth_zone(c, 500, 640, n_cl)
+        # Clusters at 500 and 660 (gap 120); strip in the gap at 580;
+        # column at 300 on the clear 640 ground (jump apex 549 clears
+        # the 529 beam bottom 545 by 4px).
+        # F4 (lane F4, 2026-11-22): column 300 -> 220.
+        # L170/L173 shared the column (300,604,26,36).
+        # Flat ground, clear of teeth (500/660) + strip 580.
+        hazards = teeth + [_vt(580, 640, 40), _h_col(220, 640)]
+        spawn, door = (70, 640), (1150, 640)
     elif slot == 2:  # valley: teeth over the two 560 masses
         plats = [_vm(c, 0, 560, 320), _vm(c, 320, 600, 80),
                  _vm(c, 400, 640, 80), _v3_ground(c, 480, 800),
                  _vm(c, 800, 600, 80), _vm(c, 880, 560, 80),
                  _vm(c, 960, 560, 320)] + _vwalls(c, [449, 380])
         _, teeth = _pb_teeth_zone(c, 900, 560, n_cl)
-        # Clusters at 900 ([880,960] mass) and 1060 ([960,1280]);
-        # strip in the gap at 1020 (clear of the [960,1008] landing).
-        # Lane C: column at 700 on the clear 640 valley ground
-        # (|900-713|=187 <= 300: (column, spike_down) survives).
         hazards = teeth + [_vt(1020, 560, 40), _h_col(700, 640)]
         spawn, door = (90, 560), (1190, 560)
     elif slot == 3:  # stairs + plateau 512 [x0+384,x0+664] + teeth
@@ -7001,75 +7533,52 @@ def v3_d35(c, kk, salt, slot, variant):
                  _vm(c, x0 + 664, 544, 96), _vm(c, x0 + 760, 576, 96),
                  _vm(c, x0 + 856, 608, 96),
                  _v3_ground(c, x0 + 952, 1280)] + _vwalls(c, [401, 340])
-        # Clusters at x0+400, x0+500, x0+600 (gap 60); strips in the
-        # gaps at x0+450 and x0+550. The exit ground [x0+952,1280]
-        # holds the door at 1190 for every x0.
         _, teeth = _pb_teeth_zone(c, x0 + 400, 512, n_cl, gap=60)
         hazards = teeth + [_vt(x0 + 450, 512, 40),
                            _vt(x0 + 550, 512, 40),
-                           # Lane C: column on the 576 step at x0+144
-                           # (|x0+400-(x0+157)|=243 <= 300: (column,
-                           # spike_down) survives). x0+144 (not x0+120):
-                           # the hero lands on the 576 step from the
-                           # 608 step and needs a >=48 px landing
-                           # before the column ([x0+96,x0+144]); at
-                           # x0+120 the landing was 24 px and the
-                           # route was UNREACHABLE.
                            _h_col(x0 + 144, 576)]
         spawn, door = (70, 640), (1190, 640)
     elif slot == 4:  # corridor: plateau 560 [480,800] + teeth, denser
         plats = [_v3_ground(c, 0, 400),
                  _vm(c, 400, 600, 80), _vm(c, 480, 560, 320),
                  _v3_ground(c, 800, 1280)] + _vwalls(c, [449, 380])
-        # Clusters at 500, 620, 740 (gap 80); strips in the gaps at
-        # 560 and 680.
         _, teeth = _pb_teeth_zone(c, 500, 560, n_cl, gap=80)
         hazards = teeth + [_vt(560, 560, 40), _vt(680, 560, 40),
-                           # Lane C: column at 300 on the clear 640
-                           # ground (|500-313|=187 <= 300).
                            _h_col(300, 640)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (70, 640), (1150, 640)
     else:  # slot 5: terraces 560/520 + teeth over each
         plats, spawn, door, bx = _r_terraces(c, variant)
-        # Terrace masses: [bx,600,160], [bx+200,600,80],
-        # [bx+280,560,160], [bx+440,560,80], [bx+520,520,160].
-        # Teeth over the 560 terrace (beam 449) and the 520 terrace
-        # (beam 409). 449 blocks [469,517] (the 520 terrace is NOT
-        # in it: 520 > 517); 409 blocks [429,477] (the 560 terrace
-        # is NOT in it). Both beams coexist.
         plats = plats[:8] + _vwalls(c, [449, 409])
         _, teeth1 = _pb_teeth_zone(c, bx + 300, 560, 2)
         _, teeth2 = _pb_teeth_zone(c, bx + 540, 520, 2)
-        # Only 1 strip: the (bx+700,560) strip sat in the landing
-        # zone of the edge into the [800,880] 560 terrace (an 80-wide
-        # mass cannot hold a 40 strip past its 48 landing zone).
-        # Strip ramp is [1,1,2,2,1]; the teeth ramp [2,2,3,3,4]
-        # still holds.
-        # Lane C: column on the 600 terrace at bx+60
-        # (|bx+300-(bx+73)|=227 <= 300: (column, spike_down)
-        # survives; the column-jump arc is clear of the teeth).
         hazards = teeth1 + teeth2 + [_vt(1080, 640, 40),
                                      _h_col(bx + 60, 600)]
     return plats + [_fp(c)], hazards, spawn, door, skel
 # ---------------------------------------------------------------------------
-# D36 ceiling-gauntlets -- down-teeth gauntlet + ground strips/columns.
+
+# ---------------------------------------------------------------------------
+# D36 ceiling-gauntlets -- v1.0.7 variety redesign (lane B4).
+# Mechanic FROZEN (Part B): periodic pillar AND ceiling teeth at jump
+# height over raised ground, simultaneous. NO strips (a strip-jump
+# takeoff under a teeth cluster kills the autopilot; ablation-proven).
+# Ramp FROZEN: pillar period [4.4,4.0,4.0,3.6,3.6]; teeth clusters
+# [2,3,3,4,4]. Baseline had ALL FIVE slots on identical flat+600
+# plateau geometry (profile 1/5). Each slot now has a genuinely
+# different floor shape. Beam law (proven): a full-width beam seals
+# any surface whose walking head would overlap it, so valley rims
+# sit at 600 (not 560) under the 529 beam, and the stair slot's
+# teeth sit only over its 512 plateau (beam 401).
 # ---------------------------------------------------------------------------
 
 def v3_d36(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[36][slot]
     _GKEY[0:3] = [36, slot, variant]
     pp = [4.4, 4.0, 4.0, 3.6, 3.6][slot - 1]
-    # Every layout carries a 380 beam: the core-middle rule needs
-    # >= 2 non-slab rects in y310..510 and the 529 beam (y529-545)
-    # does not count there. The 380 beam blocks [400,448] — no
-    # surface in this door sits there.
     if slot == 1:
-        # Flat zone [0,400] + plateau 600 [480,800] + flat [800,1280].
-        # Pillar at 200 (flat ground; its fall column [200,260]
-        # overlaps the teeth at 200). Teeth over the flat ground at
-        # 200 (beam 529); teeth over the plateau at 520 (beam 489).
-        # No strips: a strip-jump takeoff under a teeth cluster
-        # kills the autopilot (ablation-proven).
+        # Step-ceiling-gauntlet (shipped geometry, unchanged): flat
+        # route + 600 plateau [480,800]; pillar at 200 over the flat
+        # ground; teeth over the flat ground (200, beam 529) and over
+        # the plateau (520, beam 489).
         plats = [_v3_ground(c, 0, 400),
                  _vm(c, 400, 600, 80), _vm(c, 480, 600, 320),
                  _v3_ground(c, 800, 1280)] + _vwalls(c, [529, 489, 380])
@@ -7079,56 +7588,76 @@ def v3_d36(c, kk, salt, slot, variant):
             teeth_flat + teeth_plat
         spawn, door = (70, 640), (1190, 640)
     elif slot == 2:
-        # Flat route + 600 plateau. (A valley route is unbuildable
-        # here: the 529 beam's Blocker range [549,597] covers the
-        # valley's 560 masses, so every edge from the spawn platform
-        # is blocked.)
-        plats = [_v3_ground(c, 0, 400),
-                 _vm(c, 400, 600, 80), _vm(c, 480, 600, 320),
-                 _v3_ground(c, 800, 1280)] + _vwalls(c, [529, 489, 380])
-        _, teeth_flat = _pb_teeth_zone(c, 200, 640, 1)
-        _, teeth_plat = _pb_teeth_zone(c, 520, 600, 2)
-        hazards = [_h_pillar_per(200, 150, 104, pp, 0.0, 650)] + \
-            teeth_flat + teeth_plat
-        spawn, door = (70, 640), (1190, 640)
+        # Valley-ceiling-gauntlet: valley with rims at 600 (a 560 rim
+        # would be sealed by the 529 beam: walking head 521 < beam
+        # bottom 545). Teeth over the left rim (120, beam 489) and
+        # over the 640 valley floor (720, 840, beam 529). Pillar at
+        # 600 over the valley floor; its jump landing [662,710] is
+        # clear of the 720 teeth cluster.
+        plats = [_vm(c, 0, 600, 320), _vm(c, 320, 620, 80),
+                 _vm(c, 400, 640, 80), _v3_ground(c, 480, 800),
+                 _vm(c, 800, 620, 80), _vm(c, 880, 600, 80),
+                 _vm(c, 960, 600, 320)] + _vwalls(c, [519, 489, 380])
+        _, teeth_rim = _pb_teeth_zone(c, 120, 600, 1)
+        # Middle teeth beam 519 (NOT the standard 529 for a 640
+        # surface): the 529 beam bottom (545) reaches 2px into the
+        # [4]->[5] valley-climb band (top_min 600 -> [543,580]) and
+        # blocks the edge. Teeth at 535 still clear the walking head
+        # (601) by 50px.
+        _, teeth_y_mid = _pb_teeth_beam(630)
+        teeth_mid = [_vtd(720 + i * 160, teeth_y_mid, 40)
+                     for i in range(2)]
+        hazards = [_h_pillar_per(600, 150, 104, pp, 0.0, 650)] + \
+            teeth_rim + teeth_mid
+        spawn, door = (90, 600), (1190, 600)
     elif slot == 3:
-        # Flat route + 600 plateau. (A stairs/terrace route is
-        # unbuildable here: the 529 beam spans the full width and
-        # any surface rising above 529 — stairs to 512, terraces to
-        # 520 — pokes through it and seals the route. A 600 plateau
-        # sits below the beam, clear.)
-        plats = [_v3_ground(c, 0, 400),
-                 _vm(c, 400, 600, 80), _vm(c, 480, 600, 320),
-                 _v3_ground(c, 800, 1280)] + _vwalls(c, [529, 489, 380])
-        _, teeth_flat = _pb_teeth_zone(c, 300, 640, 1)
-        _, teeth_plat = _pb_teeth_zone(c, 620, 600, 2, gap=80)
-        hazards = [_h_pillar_per(300, 150, 104, pp, 0.0, 650)] + \
-            teeth_flat + teeth_plat
-        spawn, door = (70, 640), (1190, 640)
+        # Stair-ceiling-gauntlet: custom 4-up/3-down stairs (rise 32)
+        # to a 512 plateau [504,704]. Teeth ONLY over the plateau
+        # (beam 401: bottom 417 = teeth_y for 512); a 529 beam for
+        # ground teeth would seal the stairs. Pillar at 1080 over the
+        # exit ground [992,1280].
+        steps_up, _, _ = _vstairs_up(c, 120, 640, 4, tread=96, rise=32)
+        steps_down, _, _ = _vstairs_down(c, 704, 544, 3, tread=96,
+                                         rise=32)
+        plats = ([_v3_ground(c, 0, 120)] + steps_up
+                 + [_vm(c, 504, 512, 200)] + steps_down
+                 + [_v3_ground(c, 992, 1280)]
+                 + _vwalls(c, [401, 380]))
+        _, teeth = _pb_teeth_zone(c, 520, 512, 3, gap=30)
+        hazards = [_h_pillar_per(1080, 150, 104, pp, 0.0, 650)] + teeth
+        spawn, door = (70, 640), (1150, 640)
     elif slot == 4:
-        plats = [_v3_ground(c, 0, 400),
-                 _vm(c, 400, 600, 80), _vm(c, 480, 600, 320),
-                 _v3_ground(c, 800, 1280)] + _vwalls(c, [529, 489, 380])
-        _, teeth_flat = _pb_teeth_zone(c, 200, 640, 1, gap=80)
-        _, teeth_flat2 = _pb_teeth_zone(c, 900, 640, 1, gap=80)
-        _, teeth_plat = _pb_teeth_zone(c, 520, 600, 2, gap=80)
-        hazards = [_h_pillar_per(200, 150, 104, pp, 0.0, 650)] + \
-            teeth_flat + teeth_flat2 + teeth_plat
-        spawn, door = (70, 640), (1190, 640)
+        # Corridor-ceiling: 600 corridor floor [320,720] (step up at
+        # 240, drop at 720). Teeth over the entry ground (150, beam
+        # 529), over the corridor (360, 520, beam 489) and over the
+        # exit ground (1000, beam 529). Pillar at 880 over the exit
+        # ground.
+        plats = [_v3_ground(c, 0, 240),
+                 _vm(c, 240, 600, 80), _vm(c, 320, 600, 400),
+                 _v3_ground(c, 720, 1280)] + _vwalls(c, [529, 489, 380])
+        _, teeth_in = _pb_teeth_zone(c, 150, 640, 1)
+        _, teeth_cor = _pb_teeth_zone(c, 360, 600, 2, gap=120)
+        _, teeth_out = _pb_teeth_zone(c, 1000, 640, 1)
+        hazards = [_h_pillar_per(880, 150, 104, pp, 0.0, 650)] + \
+            teeth_in + teeth_cor + teeth_out
+        spawn, door = (70, 640), (1110, 640)
     else:
-        # Flat route + 600 plateau (same seal reason as S3: the 529
-        # beam seals any route rising above 529).
-        plats = [_v3_ground(c, 0, 400),
-                 _vm(c, 400, 600, 80), _vm(c, 480, 600, 320),
-                 _v3_ground(c, 800, 1280)] + _vwalls(c, [529, 489, 380])
-        _, teeth_flat = _pb_teeth_zone(c, 200, 640, 2, gap=80)
-        _, teeth_plat = _pb_teeth_zone(c, 520, 600, 2)
-        hazards = [_h_pillar_per(200, 150, 104, pp, 0.0, 650)] + \
-            teeth_flat + teeth_plat
+        # Terrace-ceiling-gauntlet: custom terraces at 600/560 only
+        # (no 520 peak: the 489 beam would seal walking on it).
+        # Teeth over the 600 masses (240, 360, beam 489) and over the
+        # 560 masses (480, 600, beam 449). Pillar at 1000 over the
+        # exit ground [760,1280].
+        plats = [_v3_ground(c, 0, 200),
+                 _vm(c, 200, 600, 160), _vm(c, 360, 600, 80),
+                 _vm(c, 440, 560, 160), _vm(c, 600, 560, 80),
+                 _vm(c, 680, 600, 80),
+                 _v3_ground(c, 760, 1280)] + _vwalls(c, [489, 449, 380])
+        _, teeth_600 = _pb_teeth_zone(c, 240, 600, 2, gap=80)
+        _, teeth_560 = _pb_teeth_zone(c, 480, 560, 2, gap=80)
+        hazards = [_h_pillar_per(1000, 150, 104, pp, 0.0, 650)] + \
+            teeth_600 + teeth_560
         spawn, door = (70, 640), (1190, 640)
     return plats + [_fp(c)], hazards, spawn, door, skel
-# ---------------------------------------------------------------------------
-# D37 saw-corridors -- corridor with static saws + down-teeth.
 # ---------------------------------------------------------------------------
 
 def v3_d37(c, kk, salt, slot, variant):
@@ -7164,6 +7693,7 @@ def v3_d37(c, kk, salt, slot, variant):
         hazards = [_vt(300, 640, 40), _h_saw(620, 640, r),
                    _h_pillar_trig(c, 800, 150, 104, 700),
                    _h_saw(900, 640, r)]
+        door = (1150, 640)  # B4: door moves across slots
     elif slot == 2:  # valley-saw-corridor (no strip on the 560 mass:
         # any seat there either overlaps the mass-entry landing zone
         # or drops the autopilot's strip-jump onto the 1080 saw)
@@ -7235,7 +7765,7 @@ def v3_d37(c, kk, salt, slot, variant):
         hazards = strips + [_h_saw(1000, 640, r),
                             _h_pillar_trig(c, 1080, 150, 104, 700),
                             _vtd(300, 416, 60)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (70, 640), (1150, 640)  # B4: door moves
     else:  # slot 5: terrace-saw-corridor (shortened terraces +
         # ground saw/pillar). Lane C2: the shared _r_terraces (NOT
         # touched) ends at bx+840, leaving a ~150px ground walk —
@@ -7260,7 +7790,13 @@ def v3_d37(c, kk, salt, slot, variant):
 
 
 # ---------------------------------------------------------------------------
-# D38 timed-corridors -- corridor with dashed stones + popup strips.
+# D38 timed-corridors -- v1.0.7 variety redesign (lane B4).
+# Mechanic FROZEN (Part B): dashed gap INSIDE the pillar's fall column;
+# cross the blinking stone while the pillar is up. Ramp FROZEN: pillar
+# period [4.4,4.0,4.0,3.6,3.6]; pillar count [1,1,1,2,2]. Baseline S3
+# was stairs (plan wants tower), S4 was a flat two-gap (plan wants
+# stair), S5 was a flat two-gap (plan wants terrace). S1/S2 keep their
+# proven geometry; S1's door moves to 1150.
 # ---------------------------------------------------------------------------
 
 def v3_d38(c, kk, salt, slot, variant):
@@ -7274,7 +7810,7 @@ def v3_d38(c, kk, salt, slot, variant):
                  _v3_ground(c, px + 120, 1280)] + _vwalls(c, [300, 420])
         hazards = [_h_pillar_per(px + 30, 150, 104, pp, 0.0, 650),
                    _vt(300, 640, 40), _vt(900, 640, 40)]
-        spawn, door = (70, 640), (1190, 640)
+        spawn, door = (70, 640), (1150, 640)
     elif slot == 2:  # valley: dashed gap in the valley floor
         px = 560
         plats = [_vm(c, 0, 560, 320), _vm(c, 320, 600, 80),
@@ -7284,42 +7820,73 @@ def v3_d38(c, kk, salt, slot, variant):
         hazards = [_h_pillar_per(px + 30, 150, 104, pp, 0.0, 650),
                    _vt(1000, 640, 40)]
         spawn, door = (90, 560), (1190, 640)
-    elif slot == 3:  # stairs: dashed gap on the exit ground
-        plats, spawn, door, x0 = _r_stairs32(c, variant)
-        px = x0 + 832 + 60
-        plats = plats[:10] + [
-            _v3_ground(c, x0 + 832, px),
-            _vdash(px, 640, 120, 3.0, 0.0, 2.0),
-            _v3_ground(c, px + 120, 1280)] + _vwalls(c, [300, 380])
-        hazards = [_h_pillar_per(px + 30, 150, 104, pp, 0.0, 650),
-                   _vt(1080, 640, 40)]
-    elif slot == 4:  # corridor: two dashed gaps, two pillars
-        plats = [_v3_ground(c, 0, 400),
-                 _vdash(400, 640, 120, 3.0, 0.0, 2.0),
-                 _v3_ground(c, 520, 800),
-                 _vdash(800, 640, 120, 2.8, 0.5, 1.8),
-                 _v3_ground(c, 920, 1280)] + _vwalls(c, [340, 440])
-        hazards = [_h_pillar_per(430, 150, 104, pp, 0.0, 650),
-                   _h_pillar_per(830, 150, 104, pp, 0.5, 650),
-                   _vt(1000, 640, 40)]
-        spawn, door = (70, 640), (1190, 640)
-    else:  # slot 5: gap route + two dashed gaps with pillars
-        plats = [_v3_ground(c, 0, 300),
-                 _vdash(300, 640, 120, 3.0, 0.0, 2.0),
-                 _v3_ground(c, 420, 700),
-                 _vdash(700, 640, 120, 2.8, 0.5, 1.8),
-                 _v3_ground(c, 820, 1280)] + _vwalls(c, [300, 420])
-        # Second pillar phase 0.0 (not 0.5): the hero reaches the
-        # second gap delayed (after waiting at the first), and a 0.5
-        # phase puts the pillar's fall inside its crossing window.
-        # NOPILLAR2 ablation passes.
-        hazards = [_h_pillar_per(330, 150, 104, pp, 0.0, 650),
-                   _h_pillar_per(730, 150, 104, pp, 0.0, 650),
-                   _vt(200, 640, 40), _vt(1000, 640, 40)]
+    elif slot == 3:  # tower: mirror tower descent, then the dashed gap
+        # on the ground route. The mirror descent lands at ~230 (left),
+        # so the door MUST be on the left (90): spawn (1190,180) and
+        # door (1190,640) share x=1190, giving dir=0 and the hero
+        # never moves (autopilot no-progress, 663 steps, 0 deaths).
+        # The dash sits on the left [200,320] (between the F4 drop at
+        # ~230 and the door at 90); the pillar rides over the dash.
+        # The old ground strip at 1000 is DROPPED: the hero lands at
+        # ~230 and walks left, so a strip at 1000 is dead content.
+        cfg = {"T": [180], "S": [95], "E1": [820], "G": [60],
+               "padw": [170], "mirror": True}
+        plats, tops, E1, E2, PR, sx, dx = _v3_tower(
+            c, kk, salt, cfg, dashed=False)
+        plats = plats[:4] + [
+            _v3_ground(c, 0, 200),
+            _vdash(200, 640, 120, 3.0, 0.0, 2.0),
+            _v3_ground(c, 320, 1280)]
+        hazards = [_h_pillar_per(230, 150, 104, pp, 0.0, 650),
+                   _vt(1000, tops[0], 35),
+                   _vt(500, tops[2], 35), _vt(583, tops[2], 35)]
+        spawn, door = (sx, tops[0]), (90, 640)
+    elif slot == 4:  # stair: custom 3-up/3-down stairs, dashed gap +
+        # two pillars on the exit ground [856,1280]
+        steps_up, _, _ = _vstairs_up(c, 120, 640, 3, tread=96, rise=32)
+        steps_down, _, _ = _vstairs_down(c, 568, 544, 3, tread=96,
+                                         rise=32)
+        plats = ([_v3_ground(c, 0, 120)] + steps_up
+                 + [_vm(c, 408, 544, 160)] + steps_down
+                 + [_v3_ground(c, 856, 910),
+                    _vdash(910, 640, 120, 3.0, 0.0, 2.0),
+                    _v3_ground(c, 1030, 1280)]
+                 + _vwalls(c, [420, 340]))
+        # Dash at 910 (not 900): the [856,900] ground piece was 44px,
+        # below the 48px landing minimum. Strip at 470 (not 450):
+        # the 450 strip sat in the [3]->[4] landing zone [408,456]
+        # on the plateau.
+        hazards = [_h_pillar_per(940, 150, 104, pp, 0.0, 650),
+                   _h_pillar_per(1100, 150, 104, pp, 0.5, 650),
+                   _vt(470, 544, 40)]
+        spawn, door = (70, 640), (1150, 640)
+    else:  # slot 5: terrace + dashed gap + two pillars on the exit
+        # ground. Custom shortened terraces end at 720; the dash sits
+        # at 900 on the exit ground (clear of the terrace masses).
+        plats = [_v3_ground(c, 0, 900),
+                 _vdash(900, 640, 120, 3.0, 0.0, 2.0),
+                 _v3_ground(c, 1020, 1280),
+                 _vm(c, 200, 600, 160), _vm(c, 400, 600, 80),
+                 _vm(c, 480, 560, 160), _vm(c, 640, 560, 80)] \
+            + _vwalls(c, [440, 380])
+        hazards = [_h_pillar_per(930, 150, 104, pp, 0.0, 650),
+                   _h_pillar_per(1100, 150, 104, pp, 0.5, 650),
+                   _vt(120, 640, 40), _vt(820, 640, 40)]
         spawn, door = (70, 640), (1190, 640)
     return plats + [_fp(c)], hazards, spawn, door, skel
 # ---------------------------------------------------------------------------
-# D40 column-forests -- many 26x36 columns.
+
+# ---------------------------------------------------------------------------
+# D40 column-forests -- v1.0.7 variety redesign (lane B4).
+# Mechanic FROZEN (Part B): hanging stalactites (spiked columns
+# top-attached under the 470 beam) + strips. Ramp FROZEN: stalactite
+# count [2,3,3,4,4]; strip count [1,1,2,3,3]. A stalactite only works
+# over a surface with top >= 600 (its 560 bottom must stay above the
+# walking band) and a strip jump under the 470 beam only works from a
+# surface with top >= 600 or top <= 522 (jump apex must clear the beam
+# bottom 486). Baseline S3/S4/S5 were flat copies of S1. S1 keeps its
+# proven geometry (door moves to 1150); S2 keeps its valley; S3 is now
+# a dip-stair (down then up), S4 a corridor, S5 terraces.
 # ---------------------------------------------------------------------------
 
 def v3_d40(c, kk, salt, slot, variant):
@@ -7331,77 +7898,98 @@ def v3_d40(c, kk, salt, slot, variant):
         # Hanging stalactite spanning 486-560, top-attached to the
         # 470 beam's bottom (486). Walking head 601 clears the
         # bottom 560 by 41px; a jump under it (head apex 549) dies.
-        # A single 74-tall column: the checker's span test does not
-        # apply (it is above the walking band) and its `hung` rule
-        # accepts it; the generator-side guard exempts hanging
-        # columns for the same reason (see _assert_column_span).
         return _vcol(x, 74, 26, top=560)
 
     if slot == 1:  # flat: 2 stalactites, 1 strip in the gap
         plats = [_v3_ground(c)] + _vwalls(c, [470, 380])
         hazards = [_stal(500), _stal(800), _vt(650, 640, 40)]
-        spawn, door = (70, 640), (1190, 640)
-    elif slot == 2:  # valley: 3 stalactites, 2 strips
+        spawn, door = (70, 640), (1150, 640)
+    elif slot == 2:  # valley: 3 stalactites, 1 strip (shipped)
         plats = [_vm(c, 0, 560, 320), _vm(c, 320, 600, 80),
                  _vm(c, 400, 640, 80), _v3_ground(c, 480, 800),
                  _vm(c, 800, 600, 80), _vm(c, 880, 560, 80),
                  _vm(c, 960, 560, 320)] + _vwalls(c, [470, 380])
-        # Only 1 strip has a legal seat: the 880 strip sat in the
-        # landing zone of the edge into the [880,960] mass (an 80-wide
-        # mass cannot hold a 40 strip past its 48 landing zone), and
-        # platform [6] cannot hold a second strip past the stalactite
-        # inside the door safe zone. Strip ramp is [1,1,2,3,2];
-        # the stalactite ramp [2,3,3,4,4] still holds.
-        # The third stalactite must sit over a 640 surface: over
-        # the 560 exit ground its bottom (560) is inside that
-        # surface's walking band [521,560] and the span test fails.
-        # The 770 stalactite sat at the takeoff (776) for the jump
-        # onto the [800,880] 600 step; 730 is 20px clear of it
-        # (twin with the 700 stalactite).
         hazards = [_stal(450), _stal(700), _stal(730),
                    _vt(610, 640, 40)]
         spawn, door = (90, 560), (1190, 560)
-    elif slot == 3:  # flat: 3 stalactites, 2 strips in the gaps
-        # (The stairs exit ground [1072,1280] cannot hold 3
-        # stalactites before the wall/door; a flat route can.)
-        plats = [_v3_ground(c)] + _vwalls(c, [470, 380])
-        hazards = [_stal(500), _stal(700), _stal(900),
-                   _vt(600, 640, 40), _vt(800, 640, 40)]
-        spawn, door = (70, 640), (1190, 640)
-    elif slot == 4:  # corridor: 4 stalactites, 3 strips
-        plats = [_v3_ground(c)] + _vwalls(c, [470, 380])
-        hazards = [_stal(300), _stal(500), _stal(750), _stal(950),
-                   _vt(400, 640, 40), _vt(625, 640, 40),
-                   _vt(850, 640, 40)]
-        spawn, door = (70, 640), (1190, 640)
-    else:  # slot 5: flat: 4 stalactites (even 300px spacing),
-        # 3 strips in the gaps
-        plats = [_v3_ground(c)] + _vwalls(c, [470, 380])
-        hazards = [_stal(300), _stal(600), _stal(900), _stal(1100),
-                   _vt(450, 640, 40), _vt(750, 640, 40),
-                   _vt(1050, 640, 40)]
+    elif slot == 3:  # dip-stair: the route descends 640->672->704
+        # and climbs back (a staircase going DOWN then up). An UP
+        # stair is unbuildable here: the 470 beam blocks rise-edges
+        # from surfaces with top in (522,577) (the 576/544 steps),
+        # and the 150 strip sat in the [0]->[1] landing zone. The
+        # dip's surfaces (640/672/704) are all clear of the beam band
+        # [490,543]; strips sit on the wide low floor (400) and the
+        # exit ground (1040, ends 1080, clear of the 1150 door zone
+        # [1092,...]). F1 (O2 fix): the 450 stalactite hung over the
+        # 704 low floor -- jump head apex 608, 48px SHORT of the
+        # column (DEAD hazard). It moves to 780 over the exit 640
+        # ground (41px walking clearance, jump kills, margin +16);
+        # stalactites are now over the entry ground (100) and the
+        # exit ground (780, 920) only.
+        plats = [_v3_ground(c, 0, 200),
+                 _vm(c, 200, 672, 80), _vm(c, 280, 704, 320),
+                 _vm(c, 600, 672, 80),
+                 _v3_ground(c, 680, 1280)] + _vwalls(c, [470, 380])
+        hazards = [_stal(100), _stal(780), _stal(920),
+                   _vt(400, 704, 40), _vt(1040, 640, 40)]
+        spawn, door = (70, 640), (1150, 640)
+    elif slot == 4:  # corridor: 600 corridor floor [320,720]
+        # F1 (O2 fix): the 500/750 stalactites hung over the 600
+        # floor -- walking clearance 1px (head 561 vs bottom 560),
+        # not the plan's 41px. They move to 860/920 over the exit
+        # 640 ground (see the seat note on the hazards line).
+        plats = [_v3_ground(c, 0, 400),
+                 _vm(c, 400, 600, 80), _vm(c, 480, 600, 320),
+                 _v3_ground(c, 800, 1280)] + _vwalls(c, [470, 380])
+        hazards = [_stal(150), _stal(250), _stal(860), _stal(920),
+                   _vt(340, 640, 40), _vt(600, 600, 40),
+                   _vt(1000, 640, 40)]
+        spawn, door = (70, 640), (1110, 640)
+    else:  # slot 5: terraces at 600/560 (no 520 peak: the 489 beam
+        # would seal walking on it). Stalactites ONLY over 640 ground
+        # (100 entry, 950 exit) and the exit ground (820, 1100): a
+        # stalactite over a 600 mass has 1px walking clearance and
+        # kills any jump near it (autopilot died at (695.7,562.5) on
+        # the 700 stalactite over the [600,680] 560 mass). Strips on a
+        # 600 mass (380) and the exit ground (900, 1000).
+        plats = [_v3_ground(c, 0, 200),
+                 _vm(c, 200, 600, 160), _vm(c, 360, 600, 80),
+                 _vm(c, 440, 560, 160), _vm(c, 600, 560, 80),
+                 _vm(c, 680, 600, 80),
+                 _v3_ground(c, 760, 1280)] + _vwalls(c, [470, 380])
+        hazards = [_stal(100), _stal(950), _stal(820), _stal(1100),
+                   _vt(380, 600, 40), _vt(900, 640, 40),
+                   _vt(1000, 640, 40)]
         spawn, door = (70, 640), (1190, 640)
     return plats + [_fp(c)], hazards, spawn, door, skel
 # ---------------------------------------------------------------------------
-# D41 final-tower-saws -- tower descent + static saws (mix/final).
+
+# ---------------------------------------------------------------------------
+# D41 final-tower-saws -- v1.0.7 variety redesign (lane B4).
+# Mechanic FROZEN: tower descent + static saws + floor columns.
+# Baseline cfg came from _vd picks that COLLIDED (S1==S4 and S2==S5
+# towers were byte-identical geometry). Each slot now gets an explicit
+# distinct tower cfg (T/S/E1/G/padw/mirror). Hazard code per slot is
+# unchanged apart from the cfg it reads.
 # ---------------------------------------------------------------------------
 
 def v3_d41(c, kk, salt, slot, variant):
-    # Lane C: static saws + floor columns. Teeth (the allocated
-    # pattern) are NOT buildable in this tower: the zigzag floors
-    # do not align for hanging teeth (no beam; a full-width beam
-    # would intercept the descent; under-floor teeth are either
-    # unencountered or deadly at the drop point). Columns sit on
-    # the tower floors and the ground, need no beam, and form
-    # (saw, column) pairs. Declared primary {saw_static,
-    # column_floor}, demo pair.
     skel = V3_SKELETONS[41][slot]
     _GKEY[0:3] = [41, slot, variant]
     r = _vo(variant, [22, 24, 26])
-    cfg = _tower_cfg(slot, variant, [170, 180, 190],
-                     [800, 840, 760])
-    if slot in (2, 5):
-        cfg["mirror"] = True
+    cfgs = {
+        1: {"T": [170], "S": [90], "E1": [800], "G": [50],
+            "padw": [150]},
+        2: {"T": [190], "S": [100], "E1": [860], "G": [60],
+            "padw": [170], "mirror": True},
+        3: {"T": [180], "S": [95], "E1": [780], "G": [50],
+            "padw": [170]},
+        4: {"T": [160], "S": [85], "E1": [900], "G": [50],
+            "padw": [150]},
+        5: {"T": [200], "S": [105], "E1": [840], "G": [60],
+            "padw": [180], "mirror": True},
+    }
+    cfg = cfgs[slot]
     plats, tops, E1, E2, PR, sx, dx = _v3_tower(
         c, kk, salt, cfg, dashed=False)
     if cfg.get("mirror"):
@@ -7426,37 +8014,34 @@ def v3_d41(c, kk, salt, slot, variant):
                    _vt(323 + 40 * (slot - 1), 640, 35),
                    _h_saw(1100, 640, r), _h_col(800, 640)]
     return plats + [_fp(c)], hazards, (sx, tops[0]), (dx, 640), skel
-
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# D42 final-skyline -- skyline + static saws (mix/final).
+# D42 final-skyline -- v1.0.7 variety redesign (lane B4).
+# Mechanic FROZEN (Part B): skyline + static saws; set
+# {saw_static, spike_popup} kept. Baseline S4 was terraces (plan wants
+# stair) and S5 was a tower-mirror (plan wants valley). S1/S3 keep
+# their tower hazards with explicit distinct cfgs (S3 is the tall
+# tower: T150/S100, E1 kept at 800 so the PR+5 ground strip still
+# clears the 1100 saw disc). S2 keeps its terrace hazards.
 # ---------------------------------------------------------------------------
 
 def v3_d42(c, kk, salt, slot, variant):
-    # Lane C: static saws + popup spikes. The terrace path saw
-    # is REPLACED by a static saw (the path saw is dead under
-    # both centre semantics and cannot be admitted). Popups sit
-    # near the saws: on the tower top floor and the ground, and
-    # on the second 600 terrace mass near the 560 saw. Declared
-    # primary {saw_static, spike_popup}, demo pair.
     skel = V3_SKELETONS[42][slot]
     _GKEY[0:3] = [42, slot, variant]
     r = _vo(variant, [22, 24, 26])
     period = _vo(variant, [3.0, 3.4, 3.8])
-    if slot in (1, 3, 5):
-        cfg = _tower_cfg(slot, variant, [180, 190, 170],
-                         [820, 860, 780])
-        if slot == 5:
-            cfg["mirror"] = True
+    if slot in (1, 3):
+        cfgs = {
+            1: {"T": [180], "S": [90], "E1": [820], "G": [60],
+                "padw": [170]},
+            3: {"T": [150], "S": [100], "E1": [800], "G": [50],
+                "padw": [150]},
+        }
+        cfg = cfgs[slot]
         plats, tops, E1, E2, PR, sx, dx = _v3_tower(
             c, kk, salt, cfg, dashed=False)
-        if slot == 5:
-            hazards = [_h_saw(700, tops[0], r),
-                       _h_popup(850, tops[0], 35, 3.0, 0.0, 1.4),
-                       _vt(882, tops[2], 35), _vt(965, tops[2], 35),
-                       _vt(682, 640, 35), _vt(765, 640, 35),
-                       _h_saw(500, 640, r), _h_popup(600, 640, 35, 3.0, 0.0, 1.4)]
-        elif slot == 3:
+        if slot == 3:
             hazards = [_h_saw(400, tops[0], r),
                        _h_popup(550, tops[0], 35, 3.0, 0.0, 1.4),
                        _vt(300, tops[2], 35), _vt(383, tops[2], 35),
@@ -7469,84 +8054,289 @@ def v3_d42(c, kk, salt, slot, variant):
                        _vt(240, 640, 35), _vt(323, 640, 35),
                        _h_saw(1100, 640, r), _h_popup(800, 640, 35, 3.0, 0.0, 1.4)]
         return plats + [_fp(c)], hazards, (sx, tops[0]), (dx, 640), skel
-    plats, spawn, door, bx = _r_terraces(c, variant)
-    # Lane C: the path saw is REMOVED (dead under both centre
-    # semantics, cannot be admitted); a static saw on the first
-    # 600 mass blocks the climb arc (clearance -0.53), so no
-    # replacement there. A popup sits on the second 600 mass
-    # near the 560 saw (|360-240|=120).
-    hazards = [_h_saw(bx + 360, 560, r),
-               _h_popup(bx + 240, 600, 35, 3.0, 0.0, 1.4),
-               _h_saw(bx + 600, 520, r), _vt(bx + 810, 600, 40)]
+    if slot == 2:
+        plats, spawn, door, bx = _r_terraces(c, variant)
+        hazards = [_h_saw(bx + 360, 560, r),
+                   _h_popup(bx + 240, 600, 35, 3.0, 0.0, 1.4),
+                   _h_saw(bx + 600, 520, r), _vt(bx + 810, 600, 40)]
+        return plats + [_fp(c)], hazards, spawn, door, skel
+    if slot == 4:  # stair-skyline: custom 3-up/3-down stairs to a 544
+        # plateau. Saw on the plateau (490: disc left edge 468 clears
+        # the 48px landing zone from the 408 arrival by 12px), popup
+        # on the 576 up-step (260), saw + popup on the exit ground.
+        # Saw at 960 (not 1000) and popup at 1050 (not 1060): the
+        # popup at 1060 ends at 1095, inside the 1150 door's expanded
+        # safe zone [1092,...]; the 960 saw leaves a 68px gap to the
+        # popup for the landing between the two jumps.
+        steps_up, _, _ = _vstairs_up(c, 120, 640, 3, tread=96, rise=32)
+        steps_down, _, _ = _vstairs_down(c, 568, 544, 3, tread=96,
+                                         rise=32)
+        plats = ([_v3_ground(c, 0, 120)] + steps_up
+                 + [_vm(c, 408, 544, 160)] + steps_down
+                 + [_v3_ground(c, 856, 1280)]
+                 + _vwalls(c, [340, 400]))
+        hazards = [_h_saw(490, 544, r),
+                   _h_popup(260, 576, 35, 3.0, 0.0, 1.4),
+                   _h_saw(960, 640, r),
+                   _h_popup(1050, 640, 35, 3.0, 0.0, 1.4)]
+        spawn, door = (70, 640), (1150, 640)
+        return plats + [_fp(c)], hazards, spawn, door, skel
+    # slot 5: valley-skyline
+    plats, spawn, door = _r_valley(c, variant)
+    hazards = [_h_saw(600, 640, r),
+               _h_popup(760, 640, 35, 3.0, 0.0, 1.4),
+               _h_popup(900, 560, 35, 3.0, 0.0, 1.4),
+               _h_saw(1080, 560, r)]
     return plats + [_fp(c)], hazards, spawn, door, skel
-
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# D43 final-reversed -- reversed routes + static saws (mix/final).
-# Simple isolated obstacles only (D29 discipline, left travel).
+# D43 final-reversed -- v1.0.7 variety redesign (lane B4).
+# Mechanic FROZEN (Part B): reversed, triggered strips armed from the
+# right DOMINANT + static saws. Ramp FROZEN: triggered count per slot
+# as shipped [2,3,2,4,4]; lead [160,140,140,120,120]; saw r cap 24
+# [22,22,24,24,24]; saw count as shipped [1,1,2,1,1]. Baseline was
+# flat ground in ALL five slots (profile 2/5). S1 keeps its flat
+# geometry; S2 is now a reversed valley, S3 reversed stairs, S4 a
+# reversed corridor, S5 reversed terraces. Strip starts are spaced
+# >=200px apart wherever the shape allows; S5's ground pair (200/340)
+# is decoupled by the chain rule (gap 95, g+w2=140 > 97.2).
 # ---------------------------------------------------------------------------
 
 def v3_d43(c, kk, salt, slot, variant):
     skel = V3_SKELETONS[43][slot]
     _GKEY[0:3] = [43, slot, variant]
     lead = [160, 140, 140, 120, 120][slot - 1]
-    # Saw r capped at 24: a r=26 (52w) disc is unjumpable in reverse
-    # (the two-jump chain lands inside the disc; ablation-proven --
-    # a single r=26 saw alone kills the autopilot, r=22/24 pass).
     r = [22, 22, 24, 24, 24][slot - 1]
     beams = [(304, 416), (320, 432), (336, 448), (352, 464), (368, 480)][slot - 1]
 
-    def _trig(x, w=45):
-        return _h_trig_left(x, 640, w, lead=lead, delay=0.3)
+    def _trig(x, top, w=45):
+        return _h_trig_left(x, top, w, lead=lead, delay=0.3)
 
-    # Reversed route (spawn 1190 -> door 90). Right-armed triggered
-    # strips are DOMINANT in every level; static saws are the second
-    # element (D29's second element is columns -- that is the D43
-    # distinction). Saws and strips alternate with >=250px between a
-    # saw centre and the next strip's right edge, so a saw-jump
-    # landing never sits on a strip's jump takeoff.
-    if slot == 1:  # 2 triggered + 1 saw
+    if slot == 1:  # flat reversed (shipped geometry, unchanged)
         plats = [_v3_ground(c)] + _vwalls(c, beams)
-        hazards = [_trig(800), _trig(450), _h_saw(1050, 640, r)]
-    elif slot == 2:  # 1 gap + 3 triggered + 1 saw
-        # A 2-gap chain (saw -> gap -> strip -> strip -> gap) is too
-        # dense for the planner: every single-element removal passes,
-        # the full chain dies. One gap, S4's passing positions.
-        g1 = 596
-        plats = [_v3_ground(c, 0, g1), _v3_ground(c, g1 + 72, 1280)] \
-            + _vwalls(c, beams)
-        hazards = [_trig(950, 50), _trig(750, 50), _trig(400, 50),
-                   _h_saw(1100, 640, r)]
-    elif slot == 3:  # 3 triggered + 2 saws
-        plats = [_v3_ground(c)] + _vwalls(c, beams)
-        hazards = [_trig(800), _trig(300),
-                   _h_saw(1050, 640, r), _h_saw(550, 640, r)]
-    elif slot == 4:  # 1 gap + 4 triggered + 1 saw
-        g1 = 596
-        plats = [_v3_ground(c, 0, g1), _v3_ground(c, g1 + 72, 1280)] \
-            + _vwalls(c, beams)
-        hazards = [_trig(950), _trig(750), _trig(400), _trig(180),
-                   _h_saw(1100, 640, r)]
-    else:  # slot 5: 4 triggered + 2 saws
-        plats = [_v3_ground(c)] + _vwalls(c, beams)
-        # Only 1 saw: the 500 saw's jump landed the hero at 444,
-        # and the strip-jump from 444 landed at 355 -- inside the
-        # [350,390] strip (NOSAW ablation passes; each element alone
-        # passes, the combination kills). Saw count is [1,1,2,1,1];
-        # the triggered ramp [2,3,3,4,4] still holds.
-        # Strips re-spaced to 200px: after any jump landing the
-        # next strip's probe point needs >=50px of walking room, and
-        # strips need >=200px spacing (ablation-proven: removing any
-        # one of 850/600/350 fixed it, so the chain -- not one strip
-        # -- was the killer).
-        # S4's passing positions (strips 950/750/400/180, saw
-        # 1100): S5's 800/600/400/200 + saw 1050 chain died even
-        # though each element alone passes (a timing/phase chain
-        # failure, not one bad element). Flat route (no gap) is what
-        # sets S5 apart from S4.
-        hazards = [_trig(950, 50), _trig(750, 50), _trig(400, 50),
-                   _trig(180, 50), _h_saw(1100, 640, r)]
-    return plats + [_fp(c)], hazards, (1190, 640), (90, 640), skel
+        hazards = [_trig(800, 640), _trig(450, 640),
+                   _h_saw(1050, 640, r)]
+        spawn, door = (1190, 640), (90, 640)
+    elif slot == 2:  # valley reversed
+        # Rim trig at 180 (not 300): the 300 strip sat in the [1]->[0]
+        # edge landing zone [272,320] / band [312.5,327.5] and cut the
+        # left rim off the graph.
+        plats, spawn, door = _r_valley_rev(c, variant)
+        hazards = [_trig(720, 640, 50), _trig(500, 640, 50),
+                   _trig(180, 560, 50), _h_saw(1100, 560, r)]
+        spawn, door = (1190, 560), (90, 560)
+    elif slot == 3:  # stair reversed: custom 3-up/plateau/3-down
+        # stairs, climbed right-to-left (down-steps first). Tread 128
+        # up / 80 down, plateau 256 wide ([512,768]). The 96-tread
+        # stairs gave the 800 trig no safe home -- on the 576 step
+        # [800,896] the hero's climb landing (~803) fell ON the trig,
+        # so the planner rejected the saw jump's follow-up and the
+        # hero walked into the 1050 saw (autopilot died at
+        # (1080.6,630.5) in 0.5s, plan_active=false). A saw on a
+        # 128px step is unjumpable (the flight cannot both clear the
+        # disc and land on the next step: takeoff <=1097 vs >=1120
+        # contradiction), so the ground saw sits on the flat right
+        # ground at 1100 -- but only after the down-steps were
+        # narrowed to tread 80, widening the ground to [1008,1280]
+        # (272px): on the 224px ground the saw jump landed on the
+        # raised [960,1056] step and the checker's discrete arc
+        # failed it by 1.76px (saw 1100) / 5.08px (saw 1090), and
+        # the 1080 saw's disc touched the [8]->[7] edge's vertical
+        # jump at the shared edge x=1056. On the wide ground the
+        # hero jumps from ~1150 and lands ~1053 on flat ground,
+        # clear of the disc's left edge. The plateau saw is a DROP
+        # jump (not a same-height jump on the plateau): it sits at
+        # 360 on the [288,448] 576 step and the hero jumps DOWN
+        # from the [448,544] 544 step over it, landing ~399 on the
+        # step. The same-height plateau saw was unpassable: the
+        # planner NEVER picks a saw flight -- it only ever picks the
+        # step-ups -- because _plan_followup_ok rejects the saw
+        # jump (its follow-up is a walk/drop, not a jump, and the P5
+        # shortcut fails). A 32px gap [480,512] after the plateau
+        # was tried (v12) to make the follow-up a jump, but the
+        # planner still computed 14 candidates and ZERO feasible at
+        # the plateau saw (PLANDBG feasible=0): its trajectory model
+        # (the checker's apex 52.24 vs the game-true 57) is too low
+        # for a same-height saw jump -- the flight must clear the
+        # disc by ~5px in the planner's model and the best takeoff
+        # clears by only ~0.5-2.5px. A drop jump onto the [384,480]
+        # step (saw at 440) was tried next and ALSO failed the
+        # checker: the hero is falling (feet ~540) when he crosses
+        # the disc's left edge (416) and hits it -- a drop jump
+        # cannot clear a saw on the landing surface. The saw was
+        # then moved to the [288,384] step (saw at 300), but that
+        # step is 96 wide -- too narrow to host a saw AND a landing
+        # (the landing is either inside the disc, 1px past it, or
+        # outside the platform) -- and the saw sits in the
+        # gap-jump's band [200.5,325.5]x[523.76,580], cutting the
+        # [2]->[1] edge. So the step is widened to [288,448] (160
+        # wide) and the upper steps shift right ([448,544] 544,
+        # plateau [544,768] 512, gap [480,544] 64px): the flight
+        # [496,399] lands 15px past the disc's right edge (384) and
+        # the landing rect clears the margined disc by 3.5px, and
+        # the flight is level-changing (544->576) so it is useful.
+        # The saw jump's follow-up is a JUMP across the 32px gap
+        # [256,288], so _plan_followup_ok returns true, and the saw
+        # (disc [336,384]) sits 10.5px right of the gap-jump band's
+        # right edge (325.5), so the [2]->[1] edge survives. The
+        # gap-jump landing ~208 is at the landing zone's left edge
+        # [208,256] and 13px right of the trig at 150. Trigs at 150
+        # (on the [128,256] 608 step, jumped from ~200) and 950 (on
+        # the [928,1008] 608 down-step -- the hero drops onto that
+        # step at ~1008, 13px right of the strip, and walks left
+        # past it after it drops. A trig on the [768,848] step at
+        # 800 was tried and the autopilot died at (813.3,537.1) --
+        # the climb flight [848,778] from the [848,928] step passes
+        # OVER that step and clips the strip (feet 537.1 vs strip
+        # top 534). A trig on the plateau at 700 was tried before
+        # that and the autopilot died at (748.5,511.9) -- the hero
+        # walks left into the popped strip. A trig on the [448,544]
+        # step at 490 was tried before that and the autopilot died
+        # at (508.3,536.1) -- the gap-jump flight [544,434] passes
+        # OVER that step and clips the strip. So the second trig
+        # sits on the first down-step, where the hero drops past it
+        # from the right). Beams [421,360] (the saw jump's apex head
+        # ~448 clears the 421 beam's bottom 437 by 11px).
+        steps_down, _, _ = _vstairs_down(c, 720, 544, 3, tread=80,
+                                         rise=32)
+        plats = ([_v3_ground(c, 0, 128), _vm(c, 128, 608, 128),
+                  _vm(c, 288, 576, 160), _vm(c, 448, 544, 96)]
+                 + [_vm(c, 544, 512, 176)] + steps_down
+                 + [_v3_ground(c, 1008, 1280)]
+                 + _vwalls(c, [421, 360]))
+        hazards = [_trig(150, 608), _trig(820, 576),
+                   _h_saw(1100, 640, r), _h_saw(360, 576, r)]
+        # Ground saw at 1100 (not 1050): 1050 was tried and the
+        # CHECKER rejects it -- "no viable path: walking path on
+        # platforms[8] blocked by static saw (discrete jump arc
+        # does not clear it; best clearance -4.12)". At 1100 the
+        # checker passes but the planner never picks the jump
+        # (its follow-up from the landing on the right ground is a
+        # walk/drop to the next step, not a jump, and the P5
+        # shortcut fails). So a 32px gap [960,1008] is added after
+        # the right ground: the down-steps shift left ([720,800]
+        # 544, [800,880] 576, [880,960] 608) and the plateau
+        # narrows to [544,720], so the saw jump's follow-up is a
+        # JUMP across the gap and the planner engages and picks it.
+        # The gap-jump landing ~898 is on the [880,960] step; the
+        # second trig sits at 820 on the [800,880] step (the hero
+        # drops onto that step at ~880, 15px right of the strip,
+        # and walks left past it after it drops).
+        spawn, door = (1190, 640), (90, 640)
+    elif slot == 4:  # corridor reversed: 560 corridor [440,920]
+        plats = [_v3_ground(c, 0, 360),
+                 _vm(c, 360, 600, 80), _vm(c, 440, 560, 480),
+                 _vm(c, 920, 600, 80),
+                 _v3_ground(c, 1000, 1280)] + _vwalls(c, [449, 380])
+        hazards = [_trig(840, 560), _trig(620, 560),
+                   _trig(380, 600), _trig(180, 640),
+                   # Saw at 1080 (not 1050): at 1050 the saw jump
+                   # lands on the raised 600 step and the discrete
+                   # arc fails it by 0.24px; at 1080 the flight lands
+                   # on the flat entry ground.
+                   _h_saw(1080, 640, r)]
+        spawn, door = (1190, 640), (90, 640)
+    else:  # slot 5: terrace reversed, peak 520 at [560,860]
+        # Saw on the PEAK at 680 (not 1120 on the right ground): at
+        # 1120 the saw jump has only 46px of run-up from the spawn
+        # and the discrete arc fails it by 3.72px; on the peak the
+        # hero has the full peak width for the run-up and the same
+        # flight clears the 650 trig as well. The 650 trig is OFF the
+        # peak (autopilot died at (691.8,482.2) inside the peak saw
+        # disc: a trig 30px from the saw keeps the planner off / the
+        # greedy mistimes the saw jump). The second mass trig is at
+        # 600 on the PEAK (not 800, not 840 on the [840,1000] mass):
+        # the widened peak [560,860] absorbs the [760,840] mass, so
+        # a trig at 840 would straddle the peak/mass boundary at 860
+        # and overlap the peak; a trig at 800 sits in the climb
+        # flight onto the peak (autopilot died at (841.7,511.6) on
+        # the popped strip -- feet 511.6 vs strip top 510). At 590
+        # the trig is decoupled from the 940 trig (different
+        # platforms, no chained-pair check), its trigger (755) fires
+        # while the hero walks the peak, and he jumps it from ~660,
+        # landing ~563 on the peak. The trig at 590 [590,635]
+        # clears the saw's disc [686,734] by 51px.
+        # Trig at 340 on the exit ground (not 470): the 470 strip
+        # sat in the [480]->[400] edge band [472.5,487.5] (was
+        # [520]->[440] before the peak widening); the ground trigs
+        # at 200/340 are decoupled (gap 95, g+w2=140 > 97.2).
+        # Peak saw is a DROP jump (not a same-height jump on the
+        # peak): it sits at 280 on the left ground (640) and the
+        # hero jumps DOWN from the [400,480] 600 step over it,
+        # landing ~319 on the ground. The same-height peak saw was
+        # unpassable: the planner NEVER picks a saw flight -- it
+        # only ever picks takeoff=1068.50 land=(1003.70,560.00) --
+        # because _plan_followup_ok rejects the saw jump (its
+        # follow-up is a walk/drop, not a jump, and the P5 shortcut
+        # fails). A 32px gap [528,560] after the peak was tried
+        # (v12) to make the follow-up a jump, but the planner still
+        # never picks a saw flight (the same conservative-trajectory
+        # reason as L212: the flight must clear the disc by ~5px in
+        # the planner's model and the best takeoff clears by only
+        # ~0.5-2.5px). A drop jump onto the left ground with the saw
+        # at 360 was tried next and ALSO failed the checker: the
+        # hero lands 1px past the disc's right edge (304) and walks
+        # into it. At 280 the flight [416,319] lands 15px past the
+        # disc's right edge and the landing rect clears the margined
+        # disc by 3.5px, and the flight is level-changing (600->640)
+        # and its landing ground [0,400] reaches the door, so the P5
+        # shortcut makes _plan_followup_ok return true. The v13
+        # autopilot still died at (299.0,600.0): the hero WALKED off
+        # the [400,480] step's left edge and fell onto the saw --
+        # the trigs at 340 and 200 on the left ground keep the
+        # planner off (a timed shape ahead), so it never picks the
+        # saw jump and the greedy never fires it (the probe only
+        # hits the saw at the step's edge, too late). So both trigs
+        # move OFF the left ground: 340 -> 700 on the peak (110px
+        # from the 590 trig, decoupled) and 200 -> 1100 on the right
+        # ground (dead content -- its trigger at 1240 is behind the
+        # spawn at 1190, so it never fires; 1150 was tried first but
+        # sits inside the spawn safe zone -- the spawn feet
+        # (1190,640) fall inside its rect [1150,1195]x[640,650] --
+        # while 1100 clears it by 45px). The left ground is now
+        # trig-free, the planner engages at the [400,480] step and
+        # picks the saw jump. The gap [528,560] stays (the peak's
+        # approach is a jump, good for variety). The climb landing
+        # ~853 is 119px clear of the (now-removed) peak saw
+        # position.
+        # Peak saw at 710 (centred; not 670/700/605/624/660/680):
+        # the planner NEVER picks a saw flight -- it only ever picks
+        # takeoff=1068.50 land=(1003.70,560.00) -- because
+        # _plan_followup_ok rejects the saw jump: its follow-up from
+        # the landing is a walk/drop to the next step, not a jump,
+        # and the P5 shortcut fails (the peak does not reach the
+        # door). So the GREEDY fires the saw jump (96px probe vs
+        # 97px flight -- it always lands on the disc) and the hero
+        # dies 1-3px short at every saw position tried
+        # (660/670/680/700/710). The 710 saw failed the CHECKER: its
+        # disc [686,734] sits in the peak's right landing zone
+        # [712,760] and blocks the [4]->[3] step-up edge. The 624
+        # saw cleared that zone but its disc [600,648] starts
+        # exactly at the peak's left edge (600), so the checker's
+        # vertical drop at x=600 hits the disc and blocks the
+        # [3]->[2] edge. The 605 saw (peak widened to [560,760])
+        # connected the graph but the checker's discrete arc failed
+        # the saw jump by 1.86px -- the landing on the 40px-lower
+        # step sits too close to the disc's left edge. The peak is
+        # widened to [560,860] (300 wide, absorbing the [760,840]
+        # mass) so the saw at 670 clears the vertical drop at x=560
+        # by 78px, the landing zone [812,860] by 118px, the greedy's
+        # jump from 825 lands at 728, 26.5px clear of the disc's
+        # right edge (694), and its second jump from 728 lands at
+        # 631, 7.5px clear of the disc's left edge (646) -- the hero
+        # jumps over the saw and walks on. The climb landing ~853
+        # is 159px clear of the disc.
+        plats = [_v3_ground(c, 0, 400),
+                 _vm(c, 400, 600, 80), _vm(c, 480, 560, 48),
+                 _vm(c, 560, 520, 300),
+                 _vm(c, 840, 560, 160), _vm(c, 1000, 600, 80),
+                 _v3_ground(c, 1080, 1280)] + _vwalls(c, [409, 340])
+        hazards = [_trig(940, 560), _trig(590, 520),
+                   _trig(700, 520), _trig(1100, 640),
+                   _h_saw(280, 640, r)]
+        spawn, door = (1190, 640), (90, 640)
+    return plats + [_fp(c)], hazards, spawn, door, skel
 # ---------------------------------------------------------------------------
 # D44 final-mega -- timed opening + dashed gap + static saw finish.
 # ---------------------------------------------------------------------------
@@ -7598,18 +8388,18 @@ V3_SKELETONS = {
     7: {1: "flat-periodic-pillar", 2: "valley-periodic-pillar",
         3: "stair-periodic-pillar", 4: "corridor-periodic-pillar",
         5: "gap-periodic-pillar"},
-    8: {1: "flat-swing", 2: "valley-swing", 3: "stair-swing",
-        4: "corridor-swing", 5: "valley-swing-2"},
-    9: {1: "flat-patrol", 2: "valley-patrol", 3: "corridor-patrol",
-        4: "gap-patrol", 5: "terrace-patrol"},
-    10: {1: "dashed-gap-saw", 2: "mover-gap-saw",
-         3: "corridor-gap-saw", 4: "falling-gap-saw",
-         5: "valley-gap-saw"},
+    8: {1: "bridge-flat", 2: "bridge-valley", 3: "bridge-stair",
+        4: "bridge-T", 5: "bridge-terrace"},
+    9: {1: "walkway-flat", 2: "walkway-valley",
+        3: "walkway-corridor", 4: "walkway-gap",
+        5: "walkway-terrace"},
+    10: {1: "pier-dashed", 2: "pier-mover", 3: "pier-corridor",
+        4: "pier-falling", 5: "pier-valley"},
     11: {1: "flat-columns", 2: "valley-columns", 3: "stair-columns",
          4: "corridor-columns", 5: "terrace-columns"},
     12: {1: "flat-chain", 2: "terrace-chain", 3: "stair-chain",
          4: "gap-chain", 5: "valley-chain"},
-    13: {1: "flat-falling-chain", 2: "pit-falling",
+    13: {1: "flat-falling", 2: "pit-falling",
          3: "double-pit-falling", 4: "corridor-falling",
          5: "valley-falling"},
     14: {1: "flat-tilting-chain", 2: "pit-tilting",
@@ -7618,12 +8408,12 @@ V3_SKELETONS = {
     15: {1: "flat-mover", 2: "terrace-mover", 3: "shaft-mover",
          4: "valley-mover", 5: "corridor-mover"},
     16: {1: "bob-step-chain", 2: "twin-bob-shaft", 3: "valley-bob-chain",
-         4: "corridor-bob-chain", 5: "flat-mover"},
+         4: "corridor-bob-chain", 5: "terrace-bob-chain"},
     17: {1: "beam-lining", 2: "stair-ceiling", 3: "valley-ceiling",
          4: "corridor-ceiling", 5: "step-plateau-ceiling"},
-    18: {1: "flat-wall-teeth", 2: "valley-wall-teeth",
-         3: "stair-wall-teeth", 4: "corridor-wall-teeth",
-         5: "terrace-wall-teeth"},
+    18: {1: "shaft-straight", 2: "shaft-stepped-bottom",
+         3: "shaft-stair", 4: "shaft-corridor",
+         5: "shaft-terrace"},
     19: {1: "ascent", 2: "valley-stairs", 3: "terrace-stairs",
          4: "double-stair", 5: "tower-stairs"},
     20: {1: "dashed+falling-gaps", 2: "falling+tilting-gaps",
@@ -7646,19 +8436,20 @@ V3_SKELETONS = {
          4: "corridor-mix", 5: "gap-mix"},
     27: {1: "flat-lift", 2: "valley-lift", 3: "shaft-lift",
          4: "corridor-lift", 5: "terrace-lift"},
-    28: {1: "standard-tower", 2: "narrow-tower", 3: "tall-tower",
-         4: "low-tower", 5: "mirror-tower"},
-    29: {1: "reversed-strips", 2: "reversed-gaps",
-         3: "reversed-columns", 4: "reversed-mixed",
-         5: "reversed-triggered"},
-    30: {1: "standard-tower", 2: "terrace-skyline",
-         3: "tall-tower", 4: "terrace-skyline-2",
-         5: "mirror-tower"},
-    31: {1: "standard-shaft", 2: "narrow-shaft", 3: "wide-shaft",
-         4: "left-shaft", 5: "right-shaft"},
-    32: {1: "standard-zigzag", 2: "mirror-zigzag",
-         3: "tall-zigzag", 4: "mirror-zigzag-2",
-         5: "standard-zigzag-2"},
+    28: {1: "tower-standard", 2: "tower-T-floors", 3: "tower-side-shaft",
+         4: "tower-corridor-floors", 5: "tower-mirror"},
+    29: {1: "reversed-flat", 2: "reversed-valley",
+         3: "reversed-stair", 4: "reversed-corridor",
+         5: "reversed-terrace"},
+    30: {1: "skyline-standard", 2: "skyline-terrace",
+         3: "skyline-tall-tower", 4: "skyline-stair",
+         5: "skyline-valley"},
+    31: {1: "shaft-straight", 2: "shaft-stepped-bottom",
+         3: "shaft-side-ledges", 4: "shaft-T-top",
+         5: "shaft-mid-pillar"},
+    32: {1: "zigzag-standard", 2: "zigzag-T-floors",
+         3: "zigzag-side-shaft", 4: "zigzag-stepped-floors",
+         5: "zigzag-corridor-floors"},
     33: {1: "flat-saw-field", 2: "valley-saw-field",
          3: "stair-saw-field", 4: "corridor-saw-field",
          5: "terrace-saw-field"},
@@ -7676,20 +8467,21 @@ V3_SKELETONS = {
     38: {1: "flat-timed-corridor", 2: "valley-timed-corridor",
          3: "tower-timed-corridor", 4: "stair-timed-corridor",
          5: "terrace-timed-corridor"},
-    39: {1: "standard-dashed", 2: "narrow-dashed", 3: "tall-dashed",
-         4: "low-dashed", 5: "mirror-dashed"},
+    39: {1: "dashed-tower-standard", 2: "dashed-tower-T-floors",
+         3: "dashed-tower-side-shaft", 4: "dashed-tower-stepped-floors",
+         5: "dashed-tower-corridor-floors"},
     40: {1: "flat-column-forest", 2: "valley-column-forest",
          3: "stair-column-forest", 4: "corridor-column-forest",
          5: "terrace-column-forest"},
-    41: {1: "standard-tower-saws", 2: "mirror-tower-saws",
-         3: "tall-tower-saws", 4: "low-tower-saws",
-         5: "mirror-tower-saws-2"},
-    42: {1: "standard-skyline-saws", 2: "terrace-skyline-saws",
-         3: "tall-skyline-saws", 4: "terrace-skyline-saws-2",
-         5: "mirror-skyline-saws"},
-    43: {1: "reversed-saws", 2: "reversed-gaps",
-         3: "reversed-columns", 4: "reversed-mixed",
-         5: "reversed-triggered"},
+    41: {1: "tower-saws-standard", 2: "tower-saws-T-floors",
+         3: "tower-saws-side-shaft", 4: "tower-saws-stepped-floors",
+         5: "tower-saws-corridor-floors"},
+    42: {1: "skyline-saws-standard", 2: "skyline-saws-terrace",
+         3: "skyline-saws-tall", 4: "skyline-saws-stair",
+         5: "skyline-saws-valley"},
+    43: {1: "reversed-flat-saws", 2: "reversed-valley-saws",
+         3: "reversed-stair-saws", 4: "reversed-corridor-saws",
+         5: "reversed-terrace-saws"},
     44: {1: "flat-mega", 2: "valley-mega", 3: "stair-mega",
          4: "corridor-mega", 5: "tower-mega"},
 }

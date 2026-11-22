@@ -22,6 +22,11 @@ extends SceneTree
 #     persists the flag); the map button toggles NIGHTMARE ON, and a
 #     stage tap then starts a mirrored + tightened level (spawn x
 #     mirrored, falling stand_time 1.0 -> 0.6, HUD NIGHTMARE)
+#   nm9 derives the expected mirror spawn from the level data
+#     (1280 - normal spawn_x, nightmare.gd WIDTH), never a hardcoded
+#     baseline spawn; nm10 checks the tightening on the FIRST level
+#     that has a falling platform (L001 has none), every falling
+#     platform's stand_time exactly normal x 0.6 (STAND_SCALE).
 #   nightmare win records ONLY nightmare.cfg (best_times stays
 #     empty, completed unchanged); the 215th nightmare win sets
 #     nightmare_cleared + unlocks NIGHTMARE SLAYER
@@ -337,14 +342,25 @@ func _run() -> void:
 		bool(game_nm.get("_is_nightmare"))
 		and str((game_nm.get("hud") as Node).get("_mode_text")) == "NIGHTMARE")
 	var nm_level: Dictionary = game_nm.get("current_level")
-	_check("nm9: nightmare level is x-mirrored (L001 spawn 90 -> 1190)",
-		int(float((nm_level.get("spawn", {}) as Dictionary).get("x", 0))) == 1190,
-		"spawn_x=" + str((nm_level.get("spawn", {}) as Dictionary).get("x", "?")))
-	var stand_ok := false
-	for p in (game_nm.get("runtime") as Node).get("platforms"):
-		if str(p.get("kind")) == "falling" and absf(float(p.get("stand_time")) - 0.6) < 0.001:
-			stand_ok = true
-	_check("nm10: nightmare falling stand_time tightened 1.0 -> 0.6", stand_ok)
+	# nm9: expected mirror spawn derived from the level data, not
+	# hardcoded baseline geometry (merged L001 spawn moved 90 -> 80,
+	# so the correct mirror is 1280 - 80 = 1200). Mirror rule:
+	# nightmare.gd apply(): spawn.x = WIDTH - spawn.x, WIDTH = 1280.
+	var l001: Dictionary = {}
+	for lv in _levels:
+		if str((lv as Dictionary).get("id", "")) == "L001":
+			l001 = lv
+	var normal_spawn_x := float((l001.get("spawn", {}) as Dictionary).get("x", 0.0))
+	var expected_nm_spawn := 1280.0 - normal_spawn_x
+	var nm_spawn_x := float((nm_level.get("spawn", {}) as Dictionary).get("x", 0.0))
+	_check("nm9: nightmare spawn is x-mirrored (1280 - normal L001 spawn)",
+		int(nm_spawn_x) == int(expected_nm_spawn),
+		"spawn_x=" + str(int(nm_spawn_x)) + " expected=" + str(int(expected_nm_spawn)) + " (normal L001 spawn " + str(int(normal_spawn_x)) + ")")
+	# nm10 is checked in section 5.5 below: L001 has NO falling
+	# platforms (baseline or merged), so the tightening cannot be
+	# observed on this level at all. Section 5.5 derives the first
+	# level that HAS one from the data and checks every falling
+	# platform's stand_time == normal x 0.6 there.
 	var won_nm := await _teleport_win(game_nm)
 	_check("nm11: teleport into the nightmare door completes the level", won_nm)
 	for f in range(240):
@@ -364,6 +380,58 @@ func _run() -> void:
 		game_nm.queue_free()
 	await process_frame
 	await process_frame
+
+	# --- 5.5 nightmare falling stand_time tightening (derived) -------
+	# L001 has no falling platforms, so nm10 cannot be checked on the
+	# level section 5 plays. Derive from the data instead: the first
+	# level with a falling platform, and the game's own rule
+	# (nightmare.gd STAND_SCALE 0.6): every falling platform's
+	# stand_time in the nightmare run must equal its normal value
+	# x 0.6, same count, same order. Stronger than the old check
+	# (which only asked whether ANY platform had stand_time 0.6).
+	# No win is attempted here, so no nightmare progress is recorded.
+	var fall_idx := -1
+	var fall_id := ""
+	var fall_stand: Array = []
+	for i in range(_levels.size()):
+		var lvf: Dictionary = _levels[i]
+		var sts: Array = []
+		for p in (lvf.get("platforms", []) as Array):
+			if str((p as Dictionary).get("kind", "")) == "falling":
+				sts.append(float((p as Dictionary).get("stand_time", 0.0)))
+		if not sts.is_empty():
+			fall_idx = i
+			fall_id = str(lvf.get("id", ""))
+			fall_stand = sts
+			break
+	var nm10_ok := false
+	var nm10_detail := "no level with falling platforms in the data"
+	if fall_idx >= 0:
+		TTState.return_door = -1
+		TTState.daily = false
+		TTState.nightmare = true
+		TTState.bonus = false
+		TTState.level_index = fall_idx
+		var game_fall: Node = game_scene.instantiate()
+		root.add_child(game_fall)
+		await physics_frame
+		await physics_frame
+		var rt_stand: Array = []
+		for p in (game_fall.get("runtime") as Node).get("platforms"):
+			if str(p.get("kind")) == "falling":
+				rt_stand.append(float(p.get("stand_time")))
+		nm10_ok = rt_stand.size() == fall_stand.size()
+		if nm10_ok:
+			for j in range(rt_stand.size()):
+				if absf(float(rt_stand[j]) - float(fall_stand[j]) * 0.6) >= 0.001:
+					nm10_ok = false
+		nm10_detail = "level=" + fall_id + " normal=" + str(fall_stand) + " nightmare=" + str(rt_stand) + " (x0.6)"
+		if is_instance_valid(game_fall):
+			root.remove_child(game_fall)
+			game_fall.queue_free()
+		await process_frame
+		await process_frame
+	_check("nm10: nightmare falling stand_time tightened x0.6 (first falling level, derived)", nm10_ok, nm10_detail)
 
 	# --- 6. the 215th nightmare win clears the mode ------------------
 	var rest: Array = []
