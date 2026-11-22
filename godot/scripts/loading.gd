@@ -1,67 +1,95 @@
 extends Control
 
-# Loading screen: plays the user's Google Flow preloader video full-screen on
-# cold start, then transitions to the map. Video is Ogg Theora (.ogv) — Godot
-# 4.3 VideoStreamPlayer plays Theora ONLY; MP4/H.264 will NOT play.
-# Fallback (video missing/unloadable): orange screen + TRAP TOWER label +
-# code-drawn LOADING bar, then map. No extra bar is drawn over the video
-# itself — the video already has its own loading bar.
-# Tap / click / any key skips. Safety timer forces the map at 8 s if the
-# video stalls, so the player can never be stuck on a black screen.
+# Loading screen (simple, professional — no video):
+# dark charcoal background, the Trap Tower logo centred, one thin gold
+# loading bar below it and a small LOADING + percentage label.
+# Shows ONLY on cold start (main_scene); level returns go directly to
+# map.tscn, so this screen never appears on level return.
+# The bar fills over LOAD_DURATION, then the map opens. Tap / click /
+# any key skips. Safety timer forces the map at 8 s so the player can
+# never be stuck. Fallback (logo asset missing/unloadable): code-drawn
+# TRAP TOWER text title + the same bar, never a black flash or a crash.
 
-const VIDEO_PATH := "res://assets/preloader.ogv"
+const LOGO_PATH := "res://assets/logo.png"
 const MAP_SCENE := "res://scenes/map.tscn"
-const BG_COLOR := Color(238.0 / 255.0, 77.0 / 255.0, 42.0 / 255.0)
+const BG_COLOR := Color(26.0 / 255.0, 29.0 / 255.0, 34.0 / 255.0)
+const TRACK_COLOR := Color(58.0 / 255.0, 63.0 / 255.0, 70.0 / 255.0)
+const BAR_COLOR := Color(201.0 / 255.0, 162.0 / 255.0, 39.0 / 255.0)
+const LABEL_COLOR := Color(185.0 / 255.0, 190.0 / 255.0, 198.0 / 255.0)
+const LOAD_DURATION := 2.2
 const SAFETY_TIMEOUT := 8.0
-const FALLBACK_DURATION := 2.5
+const BAR_WIDTH := 320.0
+const BAR_HEIGHT := 6.0
+const BAR_X := 480.0
+const BAR_Y := 520.0
 
-var _player: VideoStreamPlayer
 var _transitioned := false
 var _elapsed := 0.0
-var _fallback := false
-var _fallback_bar: ColorRect
-var _fallback_bar_bg: ColorRect
+var _bar_fill: ColorRect
+var _label: Label
 
 
 func _ready() -> void:
-	# Orange background first: never a black flash before the first frame.
+	# Charcoal background first: never a black flash before the first frame.
 	var bg := ColorRect.new()
 	bg.name = "Background"
 	bg.color = BG_COLOR
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
 
-	_player = VideoStreamPlayer.new()
-	_player.name = "PreloaderVideo"
-	_player.set_anchors_preset(Control.PRESET_FULL_RECT)
-	# NOTE: Godot 4.3 VideoStreamPlayer has NO expand_mode property (verified
-	# via ClassDB: no such property/constant). It draws the video stretched to
-	# the control rect, and the video is exactly 1280x720 = viewport size, so
-	# the full-rect player fills the screen exactly with no distortion.
-	_player.finished.connect(_go_to_map)
-	add_child(_player)
-
-	var stream: VideoStream = null
-	if ResourceLoader.exists(VIDEO_PATH):
-		stream = load(VIDEO_PATH) as VideoStream
-	if stream != null:
-		_player.stream = stream
-		_player.play()
+	# Logo plaque, centred. 1318x1054 source shown at 440x352 (same aspect).
+	var logo_tex: Texture2D = null
+	if ResourceLoader.exists(LOGO_PATH):
+		logo_tex = load(LOGO_PATH) as Texture2D
+	if logo_tex != null:
+		var logo := TextureRect.new()
+		logo.name = "Logo"
+		logo.texture = logo_tex
+		logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		logo.position = Vector2(420, 110)
+		logo.size = Vector2(440, 352)
+		add_child(logo)
 	else:
-		_fallback = true
-		_build_fallback()
+		_build_text_title()
+
+	# Thin loading bar: dark track + gold fill (fill grows from 0).
+	var track := ColorRect.new()
+	track.name = "BarTrack"
+	track.color = TRACK_COLOR
+	track.position = Vector2(BAR_X, BAR_Y)
+	track.size = Vector2(BAR_WIDTH, BAR_HEIGHT)
+	add_child(track)
+
+	_bar_fill = ColorRect.new()
+	_bar_fill.name = "BarFill"
+	_bar_fill.color = BAR_COLOR
+	_bar_fill.position = Vector2(BAR_X, BAR_Y)
+	_bar_fill.size = Vector2(0, BAR_HEIGHT)
+	add_child(_bar_fill)
+
+	_label = Label.new()
+	_label.name = "LoadingLabel"
+	_label.text = "LOADING 0%"
+	_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_label.add_theme_font_size_override("font_size", 20)
+	_label.add_theme_color_override("font_color", LABEL_COLOR)
+	_label.position = Vector2(0, 540)
+	_label.size = Vector2(1280, 28)
+	add_child(_label)
 
 
 func _process(delta: float) -> void:
 	if _transitioned:
 		return
 	_elapsed += delta
-	if _fallback:
-		_update_fallback()
-		if _elapsed >= FALLBACK_DURATION:
-			_go_to_map()
+	var frac: float = clampf(_elapsed / LOAD_DURATION, 0.0, 1.0)
+	_bar_fill.size = Vector2(BAR_WIDTH * frac, BAR_HEIGHT)
+	_label.text = "LOADING %d%%" % int(frac * 100.0)
+	if frac >= 1.0:
+		_go_to_map()
 	elif _elapsed >= SAFETY_TIMEOUT:
-		# Video stalled (decode error, driver issue) — never trap the player.
+		# Should never trigger (fill ends at 2.2 s); backstop only.
 		_go_to_map()
 
 
@@ -83,45 +111,13 @@ func _go_to_map() -> void:
 	get_tree().change_scene_to_file(MAP_SCENE)
 
 
-func _build_fallback() -> void:
+func _build_text_title() -> void:
 	var title := Label.new()
-	title.name = "FallbackTitle"
+	title.name = "TextTitle"
 	title.text = "TRAP TOWER"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 72)
+	title.add_theme_font_size_override("font_size", 64)
 	title.add_theme_color_override("font_color", Color.WHITE)
-	title.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	title.position = Vector2(0, 180)
+	title.position = Vector2(0, 220)
 	title.size = Vector2(1280, 90)
 	add_child(title)
-
-	var hint := Label.new()
-	hint.name = "FallbackHint"
-	hint.text = "LOADING..."
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.add_theme_font_size_override("font_size", 28)
-	hint.add_theme_color_override("font_color", Color.WHITE)
-	hint.position = Vector2(0, 560)
-	hint.size = Vector2(1280, 40)
-	add_child(hint)
-
-	_fallback_bar_bg = ColorRect.new()
-	_fallback_bar_bg.name = "FallbackBarBg"
-	_fallback_bar_bg.color = Color(0, 0, 0, 0.35)
-	_fallback_bar_bg.position = Vector2(440, 610)
-	_fallback_bar_bg.size = Vector2(400, 16)
-	add_child(_fallback_bar_bg)
-
-	_fallback_bar = ColorRect.new()
-	_fallback_bar.name = "FallbackBar"
-	_fallback_bar.color = Color.WHITE
-	_fallback_bar.position = Vector2(440, 610)
-	_fallback_bar.size = Vector2(0, 16)
-	add_child(_fallback_bar)
-
-
-func _update_fallback() -> void:
-	if _fallback_bar == null:
-		return
-	var frac: float = clampf(_elapsed / FALLBACK_DURATION, 0.0, 1.0)
-	_fallback_bar.size = Vector2(400.0 * frac, 16)
