@@ -16,6 +16,14 @@ extends RefCounted
 # wipes another lane's data. Every save path below writes ALL fields.
 #   F1 stars/skins/bonus: stars_collected [], selected_skin "default",
 #     bonus_completed [], bonus_highest 0 (bonus door locked).
+#   U1 coins: coins_collected [] (ids "L015:0" = level id + coin index).
+#   U4 keys + chapter deaths: keys_collected [] (ids "L016:0" = level
+#     id + key index, 15 keys, 5 per chapter); chapter_deaths {}
+#     (chapter id string -> int, B2 option (a)).
+#   U5 speedrun + end screens: speedrun_best {} (chapter "1"/"2"/"3"
+#     -> best seconds, float), credits_seen false (M7 shown once),
+#     celebration_seen "" (M9: "" / "stars" / "keys" — which trigger
+#     was already celebrated, so each fires once).
 #   F3 achievements/stats/ghost: deaths 0, total_time 0.0,
 #     best_times {}, achievements_unlocked [], best_improved_count 0,
 #     ghost_visible true; ghosts live in a SEPARATE user://ghosts.cfg.
@@ -35,11 +43,13 @@ const MAX_GHOST_LEVELS := 12
 static func load_progress() -> Dictionary:
 	var data := {"save_version": SAVE_VERSION, "highest_unlocked": 0, "completed": [],
 		"stars_collected": [], "skins_owned": [], "selected_skin": "default",
-		"bonus_completed": [], "bonus_highest": 0,
+		"bonus_completed": [], "bonus_highest": 0, "coins_collected": [],
+		"keys_collected": [], "chapter_deaths": {},
 		"deaths": 0, "total_time": 0.0, "best_times": {},
 		"achievements_unlocked": [], "best_improved_count": 0,
 		"ghost_visible": true, "daily_best": {}, "nightmare_unlocked": false,
-		"nightmare_cleared": false}
+		"nightmare_cleared": false, "speedrun_best": {}, "credits_seen": false,
+		"celebration_seen": ""}
 	var cfg := ConfigFile.new()
 	if cfg.load(PATH) != OK:
 		return data
@@ -54,6 +64,18 @@ static func load_progress() -> Dictionary:
 	for id in cfg.get_value("progress", "stars_collected", []):
 		stars.append(str(id))
 	data["stars_collected"] = stars
+	var coins: Array = []
+	for id in cfg.get_value("progress", "coins_collected", []):
+		coins.append(str(id))
+	data["coins_collected"] = coins
+	var keys: Array = []
+	for id in cfg.get_value("progress", "keys_collected", []):
+		keys.append(str(id))
+	data["keys_collected"] = keys
+	var cdeaths: Dictionary = {}
+	for k in (cfg.get_value("progress", "chapter_deaths", {}) as Dictionary).keys():
+		cdeaths[str(k)] = maxi(0, int((cfg.get_value("progress", "chapter_deaths", {}) as Dictionary)[k]))
+	data["chapter_deaths"] = cdeaths
 	data["selected_skin"] = str(cfg.get_value("progress", "selected_skin", "default"))
 	var skins: Array = []
 	for id in cfg.get_value("progress", "skins_owned", []):
@@ -82,6 +104,15 @@ static func load_progress() -> Dictionary:
 	data["daily_best"] = daily
 	data["nightmare_unlocked"] = bool(cfg.get_value("progress", "nightmare_unlocked", false))
 	data["nightmare_cleared"] = bool(cfg.get_value("progress", "nightmare_cleared", false))
+	# Lane U5: speedrun bests per chapter (N8 key format: chapter
+	# number as string, "1"/"2"/"3") + end-screen one-shot flags.
+	# A v1.0.4 save has none of these keys: defaults above apply.
+	var sr_best: Dictionary = {}
+	for k in (cfg.get_value("progress", "speedrun_best", {}) as Dictionary).keys():
+		sr_best[str(k)] = float((cfg.get_value("progress", "speedrun_best", {}) as Dictionary)[k])
+	data["speedrun_best"] = sr_best
+	data["credits_seen"] = bool(cfg.get_value("progress", "credits_seen", false))
+	data["celebration_seen"] = str(cfg.get_value("progress", "celebration_seen", ""))
 	return data
 
 
@@ -91,6 +122,9 @@ static func _save(data: Dictionary) -> void:
 	cfg.set_value("progress", "highest_unlocked", int(data["highest_unlocked"]))
 	cfg.set_value("progress", "completed", data["completed"])
 	cfg.set_value("progress", "stars_collected", data["stars_collected"])
+	cfg.set_value("progress", "coins_collected", data.get("coins_collected", []))
+	cfg.set_value("progress", "keys_collected", data.get("keys_collected", []))
+	cfg.set_value("progress", "chapter_deaths", data.get("chapter_deaths", {}))
 	cfg.set_value("progress", "skins_owned", data.get("skins_owned", []))
 	cfg.set_value("progress", "selected_skin", str(data["selected_skin"]))
 	cfg.set_value("progress", "bonus_completed", data["bonus_completed"])
@@ -104,6 +138,10 @@ static func _save(data: Dictionary) -> void:
 	cfg.set_value("progress", "daily_best", data["daily_best"])
 	cfg.set_value("progress", "nightmare_unlocked", bool(data.get("nightmare_unlocked", false)))
 	cfg.set_value("progress", "nightmare_cleared", bool(data["nightmare_cleared"]))
+	# Lane U5: written by every save path like all other fields.
+	cfg.set_value("progress", "speedrun_best", data.get("speedrun_best", {}))
+	cfg.set_value("progress", "credits_seen", bool(data.get("credits_seen", false)))
+	cfg.set_value("progress", "celebration_seen", str(data.get("celebration_seen", "")))
 	cfg.save(PATH)
 
 
@@ -142,6 +180,30 @@ static func collect_star(level_id: String) -> void:
 	if stars.has(level_id):
 		return
 	stars.append(level_id)
+	_save(data)
+
+
+# Lane U1: collect one coin ("L015:0" = level id + coin index).
+# Idempotent; a collected coin never respawns (game.gd hides it on
+# rebuild from this list).
+static func collect_coin(coin_id: String) -> void:
+	var data := load_progress()
+	var coins: Array = data["coins_collected"]
+	if coins.has(coin_id):
+		return
+	coins.append(coin_id)
+	_save(data)
+
+
+# Lane U4: collect one key ("L016:0" = level id + key index).
+# Idempotent; a collected key never respawns (game.gd hides it on
+# rebuild from this list).
+static func collect_key(key_id: String) -> void:
+	var data := load_progress()
+	var keys: Array = data["keys_collected"]
+	if keys.has(key_id):
+		return
+	keys.append(key_id)
 	_save(data)
 
 
@@ -207,10 +269,14 @@ static func check_achievements(level_ids: Array = [], today_override: String = "
 # touching progress). Unknown keys are ignored.
 static func save_features_patch(patch: Dictionary) -> void:
 	var data := load_progress()
-	var allowed: Array = ["stars_collected", "skins_owned", "selected_skin",
+	var allowed: Array = ["stars_collected", "coins_collected", "keys_collected",
+		"chapter_deaths", "skins_owned", "selected_skin",
 		"bonus_completed", "bonus_highest", "daily_best", "nightmare_unlocked",
 		"nightmare_cleared", "deaths", "total_time", "best_times",
 		"achievements_unlocked", "best_improved_count", "ghost_visible"]
+	# Lane U5: appended AFTER the literal (not edited into it) so
+	# this never conflicts with the U1/U4 allowlist edits above.
+	allowed.append_array(["speedrun_best", "credits_seen", "celebration_seen"])
 	for k in patch.keys():
 		if allowed.has(str(k)):
 			data[str(k)] = patch[k]
@@ -219,9 +285,17 @@ static func save_features_patch(patch: Dictionary) -> void:
 
 # One death. Returns the achievement IDs unlocked by this death
 # (deaths_100 at 100, deaths_500 at 500; usually []).
-static func record_death() -> Array:
+# Lane U4: optional `chapter` (1/2/3, from TTFeatures) also counts
+# the death under chapter_deaths[str(chapter)] for the M8
+# chapter-complete screen; default -1 counts the global total only
+# (daily/bonus runs pass no chapter).
+static func record_death(chapter: int = -1) -> Array:
 	var data := load_progress()
 	data["deaths"] = int(data["deaths"]) + 1
+	if chapter >= 1:
+		var cdeaths: Dictionary = data.get("chapter_deaths", {})
+		cdeaths[str(chapter)] = int(cdeaths.get(str(chapter), 0)) + 1
+		data["chapter_deaths"] = cdeaths
 	var newly := _unlock_new(data, [])
 	_save(data)
 	return newly
@@ -351,3 +425,55 @@ static func ghost_count() -> int:
 			if not (cfg.get_value("ghosts", k, []) as Array).is_empty():
 				count += 1
 	return count
+
+
+# --- Lane U5: speedrun bests (M4) + end-screen one-shots (M7/M9) ---
+# speedrun_best keys are chapter numbers as strings ("1"/"2"/"3",
+# GATE-AMENDMENT-1 N8). The chapter->door mapping lives with U4's
+# chapter API; these helpers only store/return by chapter number
+# and never derive a chapter themselves.
+
+# Best speedrun time for a chapter, or -1.0 when none is saved.
+static func speedrun_best_for(chapter: int) -> float:
+	var data := load_progress()
+	var best: Dictionary = data.get("speedrun_best", {})
+	return float(best.get(str(chapter), -1.0))
+
+
+# Record a finished speedrun. Keeps the FASTER time only. Returns
+# true when the run is a new best (first run, or faster than the
+# saved best) and false when it is slower (nothing is overwritten).
+# Non-positive times are ignored (a run that never started).
+static func record_speedrun_best(chapter: int, seconds: float) -> bool:
+	if seconds <= 0.0:
+		return false
+	var data := load_progress()
+	var best: Dictionary = data.get("speedrun_best", {})
+	var prev := float(best.get(str(chapter), -1.0))
+	if prev > 0.0 and seconds >= prev:
+		return false
+	best[str(chapter)] = seconds
+	data["speedrun_best"] = best
+	_save(data)
+	return true
+
+
+# M7 credits: mark the end-credits screen as shown (one-shot — the
+# map only offers credits while credits_seen is false).
+static func mark_credits_seen() -> void:
+	var data := load_progress()
+	if bool(data.get("credits_seen", false)):
+		return
+	data["credits_seen"] = true
+	_save(data)
+
+
+# M9 celebration: mark WHICH trigger was celebrated ("" / "stars" /
+# "keys"). Each trigger fires once; a later different trigger (e.g.
+# keys after stars) still fires, because the stored value differs.
+static func mark_celebration_seen(kind: String) -> void:
+	var data := load_progress()
+	if str(data.get("celebration_seen", "")) == kind:
+		return
+	data["celebration_seen"] = kind
+	_save(data)

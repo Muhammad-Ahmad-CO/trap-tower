@@ -88,6 +88,23 @@ const FLOOR_Y := 720.0
 const FALL_DEATH_Y := 760.0
 const DOOR_W := 36.0
 const DOOR_H := 54.0
+# Rule 7 (v1.0.9 Lane A): floating main-floor slab exception — the
+# official game's floors ARE floating slabs. Designation + bounds
+# are IDENTICAL to tools/check_levels.py (main_floor_index /
+# is_floating_slab) and godot/scripts/level_data.gd
+# (_vis_main_floor_index / SLAB_*): widest solid rect (tie -> lowest
+# top on screen), w >= 800, h >= 100, top in y 200..500. The three
+# implementations must never drift. The planner needs no landing
+# change for a slab: every solid rect is landable ground, and a slab
+# edge is a fall-death edge because a flight whose feet pass
+# FALL_DEATH_Y fails in _plan_flight, and the game dies the same way
+# in _check_died (both verified, no floor-at-720 assumption anywhere
+# in the planner — FLOOR_Y below is used only for pillar drop
+# distance and the death threshold itself).
+const SLAB_MIN_W := 800.0
+const SLAB_MIN_H := 100.0
+const SLAB_TOP_MIN_Y := 200.0
+const SLAB_TOP_MAX_Y := 500.0
 # V3 planning envelope (targets x 0.85): rise 45 / gap 80 / landing
 # 48 / run-up 24. Rise gates the greedy mount window (PLAN_MAX_RISE);
 # run-up is PLAN_MIN_RUNUP (already 24.0); gap/landing have no
@@ -252,6 +269,7 @@ var _game_node: Node = null
 var _deaths_seen: int = -1
 var _plan_x: float = 0.0
 var _plan_active: bool = false
+var _plan_step_back: bool = false  # Lane P: adopted takeoff is behind the stance; walk back to it
 var _plan_brake_x: float = -1.0
 var _plan_next_check_x: float = -1e9
 var _plan_prev_on_floor: bool = false
@@ -465,6 +483,19 @@ func _shape_hits_rect(shape: Dictionary, rect: Rect2) -> bool:
 			rect.position.x + rect.size.x),
 			clampf(c.y, rect.position.y, rect.position.y + rect.size.y))
 	return closest.distance_to(c) < r
+
+
+# Lane P: lowest point of a lethal shape on screen (rect bottom, or
+# disc bottom for a saw). Walk-under model: a hazard whose bottom
+# clears the hero's head (feet.y - height) is not an obstacle while
+# running -- the game kill tests agree (rect edge-touch does not
+# intersect; circle distance == r does not kill).
+func _shape_bottom(shape: Dictionary) -> float:
+	if shape.has("rect"):
+		var r: Rect2 = shape["rect"]
+		return r.position.y + r.size.y
+	var c: Vector2 = shape["centre"]
+	return c.y + float(shape["radius"])
 
 
 # Stage 1 (Path C): time-aware shape test. Shapes carrying a "saw"
@@ -1140,17 +1171,21 @@ func _rise_span(h: float, traj: Dictionary) -> Dictionary:
 
 func _chain_window(w1: Dictionary, w2: Dictionary,
 		land_lo: float, land_hi: float, dir: float) -> Dictionary:
-	# Chained-pair window W = W1 n ((L n W2) - dir * PLAN_AIR_DX),
-	# where L = [land_lo, land_hi] is the margin-only landing zone
-	# between the two strips and D = 97.2 is the game-true air
-	# distance (a takeoff lands dir * D ahead of itself). The shift
-	# is a translation, so the interval keeps its orientation in
-	# both directions. Returns the window plus its centre: the
+	# Chained-pair window W = W1 n (L - dir * PLAN_AIR_DX),
+	# where L = [land_lo, land_hi] is the CALLER-VALIDATED landing
+	# interval and D = 97.2 is the game-true air distance (a
+	# takeoff lands dir * D ahead of itself). The shift is a
+	# translation, so the interval keeps its orientation in both
+	# directions. The caller (_strip_applicable_window) decides
+	# what L is: the landing zone capped at W2.hi when the hero
+	# can RUN from the zone to a W2 takeoff (Lane P), else the
+	# zone intersected with W2 (old rule: the landing itself must
+	# be a W2 takeoff). Returns the window plus its centre: the
 	# planner picks the CENTRE of W, never the earliest lattice
 	# point (the earliest point sits on the window edge and dies
 	# on any one-frame slip).
-	var llo: float = maxf(land_lo, float(w2["lo"]))
-	var lhi: float = minf(land_hi, float(w2["hi"]))
+	var llo: float = land_lo
+	var lhi: float = land_hi
 	if llo > lhi:
 		return {"lo": 0.0, "hi": -1.0, "ok": false, "centre": 0.0}
 	var shift: float = -dir * PLAN_AIR_DX
@@ -1301,8 +1336,20 @@ func _strip_applicable_window(lethal: Array, strip_r: Rect2,
 		return {"lo": float(w1["lo"]), "hi": float(w1["hi"]),
 				"ok": true, "centre": (float(w1["lo"])
 						+ float(w1["hi"])) * 0.5, "kind": "strip"}
-	var w: Dictionary = _chain_window(w1, w2, float(zone["lo"]),
-			float(zone["hi"]), dir)
+	# Lane P: the first jump's landing need not itself be a
+	# second-jump takeoff when the zone lets the hero RUN to one:
+	# any landing in the zone at or before W2.hi can run forward
+	# to a W2 takeoff (ground is continuous on the chain's ground
+	# line). Only when the zone ends before W2 opens (zone.hi <
+	# w2.lo) must the landing itself be a W2 takeoff (old rule).
+	var land_lo: float = float(zone["lo"])
+	var land_hi: float = float(zone["hi"])
+	if float(zone["hi"]) >= float(w2["lo"]):
+		land_hi = minf(float(zone["hi"]), float(w2["hi"]))
+	else:
+		land_lo = maxf(float(zone["lo"]), float(w2["lo"]))
+		land_hi = minf(float(zone["hi"]), float(w2["hi"]))
+	var w: Dictionary = _chain_window(w1, w2, land_lo, land_hi, dir)
 	if not bool(w.get("ok", false)):
 		# Chained pair with an empty chain window: the first jump
 		# cannot land in a spot with a valid second jump. The
@@ -1325,6 +1372,13 @@ func _plan_entry_dist(entry: float, land_x: float, dir: float) -> float:
 
 
 func _plan_reached(feet: Vector2, dir: float) -> bool:
+	# Lane P: a step-back plan's takeoff is BEHIND the stance, so
+	# the one-sided test would fire at the landing stance (wrong
+	# place). A step-back plan is reached only when the hero is
+	# AT the takeoff (within 0.5 px; the walk-back lands on the
+	# lattice exactly).
+	if _plan_step_back:
+		return absf(feet.x - _plan_x) <= 0.5
 	return feet.x >= _plan_x - 0.1 if dir > 0.0 \
 			else feet.x <= _plan_x + 0.1
 
@@ -1477,6 +1531,54 @@ func _plan_half_w() -> float:
 
 func _plan_height() -> float:
 	return float(_player_cfg["height"])
+
+
+# Rule 7 (v1.0.9 Lane A): designated main floor — the widest solid
+# rect in the level; tie -> the slab whose top is lowest on screen
+# (largest y). Identical to check_levels.main_floor_index and
+# level_data._vis_main_floor_index; the three must never drift.
+# Returns the platform index, or -1 when the level has no solid.
+func _main_floor_index(level: Dictionary) -> int:
+	var best: int = -1
+	var plats: Array = level.get("platforms", [])
+	for i in range(plats.size()):
+		var p: Dictionary = plats[i]
+		if str(p.get("kind", "")) != "solid":
+			continue
+		if best < 0:
+			best = i
+			continue
+		var r := Rect2(float(p["x"]), float(p["y"]),
+				float(p["w"]), float(p["h"]))
+		var b: Dictionary = plats[best]
+		var br := Rect2(float(b["x"]), float(b["y"]),
+				float(b["w"]), float(b["h"]))
+		if r.size.x > br.size.x \
+				or (r.size.x == br.size.x \
+						and r.position.y > br.position.y):
+			best = i
+	return best
+
+
+# True iff the level's designated main floor qualifies for the
+# rule-7 floating-slab exception (w >= 800, h >= 100, top in
+# y 200..500). The planner treats a qualifying slab exactly like
+# any other solid: landable ground, with its edges as fall-death
+# edges (feet > FALL_DEATH_Y). No reject here on purpose: the
+# checker is the validator (it runs the full grounding fixpoint,
+# which the planner must not second-guess — a wide platform
+# grounded via resting/pillar is checker-legal but would fail a
+# naive "bottom != 720" test here, so the autopilot never rejects
+# on grounding; it plays whatever the checker passed).
+func _main_floor_slab_ok(level: Dictionary) -> bool:
+	var idx: int = _main_floor_index(level)
+	if idx < 0:
+		return false
+	var p: Dictionary = (level.get("platforms", []) as Array)[idx]
+	return float(p["w"]) >= SLAB_MIN_W \
+			and float(p["h"]) >= SLAB_MIN_H \
+			and float(p["y"]) >= SLAB_TOP_MIN_Y \
+			and float(p["y"]) <= SLAB_TOP_MAX_Y
 
 
 func _plan_geometry(level: Dictionary, feet: Vector2,
@@ -2160,10 +2262,69 @@ func _plan_candidates(x0: float, y0: float, vx0: float, dir: float,
 					break
 		if not grounded:
 			break
-		out.append({"x": x, "vx": dir * speed})
+		out.append({"x": x, "vx": dir * speed, "step_back": false})
 		if absf(x - x0) >= PLAN_MAX_TAKEOFF_AHEAD:
 			break
 		x += dir * step
+	# Lane P: step-back takeoffs — up to 2 lattice steps (8.1 px)
+	# BEHIND the stance, same per-stance checks. A jump can land
+	# just past the next obstacle's takeoff window (L140: the strip
+	# jump lands at 284.65, 3.45 px past the column window
+	# [265.71, 281.17]); the hero then steps back one frame and
+	# jumps from inside the window. The direct braked landing in
+	# the window is margin-blocked (land_rect is the strip + 4 px),
+	# but the step-back landing is margin-safe and the standing /
+	# flight checks use the REAL rect, so the chain is valid.
+	# The hero reverses instantly in the game (no accel ramp), so
+	# a 1–2 frame step-back is physically real. Marked step_back
+	# so _decide walks back to the takeoff instead of firing
+	# immediately (its one-sided _plan_reached would fire at the
+	# landing stance).
+	var bx: float = x0 - step
+	for _bi in range(2):
+		var brect := Rect2(bx - hw, y0 - ph, 2.0 * hw, ph)
+		var bbad: bool = false
+		for shape in lethal:
+			if shape.has("saw"):
+				if skip_timed_stance:
+					continue
+				var t_arrive_b: float = now + absf(bx - x0) / speed
+				if _shape_hits_rect_at(shape, brect, t_arrive_b):
+					bbad = true
+					break
+			elif _shape_hits_rect(shape, brect):
+				bbad = true
+				break
+		if not bbad:
+			for r in solids:
+				if (r as Rect2).intersects(brect):
+					bbad = true
+					break
+		if bbad:
+			break
+		var bgrounded: bool = false
+		for r in solids:
+			var rr: Rect2 = r
+			if absf(rr.position.y - y0) <= 3.0 \
+					and bx >= rr.position.x - hw \
+					and bx <= rr.position.x + rr.size.x + hw:
+				bgrounded = true
+				break
+		if not bgrounded:
+			for tp in timed:
+				var tr: Dictionary = _timed_rect_at(tp, now)
+				if not bool(tr["solid"]):
+					continue
+				var trr: Rect2 = tr["rect"]
+				if absf(trr.position.y - y0) <= 3.0 \
+						and bx >= trr.position.x - hw \
+						and bx <= trr.position.x + trr.size.x + hw:
+					bgrounded = true
+					break
+		if not bgrounded:
+			break
+		out.append({"x": bx, "vx": dir * speed, "step_back": true})
+		bx -= step
 	return out
 
 
@@ -2324,7 +2485,41 @@ func _plan_engaged(feet: Vector2, lethal: Array, solids: Array,
 	return false
 
 
+# Lane P (v1.0.9): memoised wrapper. The runup need is deterministic
+# given (land_x, land_y, dir, t_land) inside one _compute_plan call:
+# lethal/solids/traj/door/timed/flight_solids are fixed there and
+# _elapsed is fixed within one frame, and `cache` is created fresh
+# per _compute_plan (never shared across geometries). The unmemoised
+# saw branch re-simulates up to 90 flights per stance; _plan_pick
+# calls it once per followup candidate, so one _compute_plan on
+# L211 ran 2,236 runups / ~200k flights (~4 s a call, effectively
+# hanging the level). The memo returns the identical value and
+# restores _last_blocked_by exactly as the unmemoised call left it
+# (diagnostic only; it never affects pass/fail). No decision changes.
 func _plan_required_runup(land_x: float, land_y: float, lethal: Array,
+		solids: Array, traj: Dictionary, cache: Dictionary,
+		dir: float, door_x: float, t_land: float = -1.0,
+		timed: Array = [], flight_solids: Array = []) -> float:
+	var rk: String = "runup|" + str(land_x) + "|" + str(land_y) \
+			+ "|" + str(dir) + "|" \
+			+ str(int(round(t_land * 60.0)) if t_land >= 0.0 else -1)
+	if cache.has(rk):
+		var rm: Dictionary = cache[rk]
+		var rb: String = str(rm.get("blocked", ""))
+		if rb != "":
+			_last_blocked_by = rb
+		return float(rm["need"])
+	var before: String = _last_blocked_by
+	var need: float = _plan_required_runup_inner(land_x, land_y,
+			lethal, solids, traj, cache, dir, door_x, t_land, timed,
+			flight_solids)
+	var after: String = _last_blocked_by
+	cache[rk] = {"need": need,
+			"blocked": after if after != before else ""}
+	return need
+
+
+func _plan_required_runup_inner(land_x: float, land_y: float, lethal: Array,
 		solids: Array, traj: Dictionary, cache: Dictionary,
 		dir: float, door_x: float, t_land: float = -1.0,
 		timed: Array = [], flight_solids: Array = []) -> float:
@@ -2353,6 +2548,12 @@ func _plan_required_runup(land_x: float, land_y: float, lethal: Array,
 			continue
 		var r: Rect2 = shape["rect"]
 		if absf(r.position.y + r.size.y - land_y) > 14.0:
+			continue
+		# Lane P: walk-under — a strip whose bottom clears the
+		# hero's head (hanging teeth) needs no runup; the hero
+		# runs under it. Ground strips never meet this (their
+		# bottom is the ground line itself).
+		if r.position.y + r.size.y <= land_y - ph:
 			continue
 		var e: float = r.position.x - hw if dir > 0.0 \
 				else r.position.x + r.size.x + hw
@@ -2397,6 +2598,11 @@ func _plan_required_runup(land_x: float, land_y: float, lethal: Array,
 		if str(shape.get("kind", "")) != "spiked_column":
 			continue
 		var c: Rect2 = shape["rect"]
+		# Lane P: walk-under column — its bottom clears the
+		# hero's head (hanging spiked column), so the hero runs
+		# under it; no column window, no runup.
+		if c.position.y + c.size.y <= land_y - ph:
+			continue
 		var ce: float = c.position.x - hw if dir > 0.0 \
 				else c.position.x + c.size.x + hw
 		var at_entry_c: bool = (ce > land_x - 28.0 \
@@ -2657,7 +2863,37 @@ func _plan_required_runup(land_x: float, land_y: float, lethal: Array,
 	return 1e9
 
 
+# Lane P (v1.0.9): memoised wrapper, same scope/guarantee as
+# _plan_required_runup above. _plan_pick calls this once per
+# feasible candidate (up to ~90), and each call re-scans every
+# followup candidate's flight; distinct (land_x, land_y, land_vx,
+# t_land) stances per _compute_plan are few, so the memo collapses
+# the repeated work. Returns the identical bool; restores
+# _last_blocked_by exactly as the unmemoised call left it.
 func _plan_followup_ok(land_x: float, land_y: float, land_vx: float,
+		dir: float, traj: Dictionary, cache: Dictionary, lethal: Array,
+		solids: Array, door_x: float, t_land: float = -1.0,
+		timed: Array = [], flight_solids: Array = []) -> bool:
+	var fk: String = "followup|" + str(land_x) + "|" + str(land_y) \
+			+ "|" + str(land_vx) + "|" + str(dir) + "|" \
+			+ str(int(round(t_land * 60.0)) if t_land >= 0.0 else -1)
+	if cache.has(fk):
+		var fm: Dictionary = cache[fk]
+		var fb: String = str(fm.get("blocked", ""))
+		if fb != "":
+			_last_blocked_by = fb
+		return bool(fm["ok"])
+	var fbefore: String = _last_blocked_by
+	var fok: bool = _plan_followup_ok_inner(land_x, land_y, land_vx,
+			dir, traj, cache, lethal, solids, door_x, t_land, timed,
+			flight_solids)
+	var fafter: String = _last_blocked_by
+	cache[fk] = {"ok": fok,
+			"blocked": fafter if fafter != fbefore else ""}
+	return fok
+
+
+func _plan_followup_ok_inner(land_x: float, land_y: float, land_vx: float,
 		dir: float, traj: Dictionary, cache: Dictionary, lethal: Array,
 		solids: Array, door_x: float, t_land: float = -1.0,
 		timed: Array = [], flight_solids: Array = []) -> bool:
@@ -2782,6 +3018,7 @@ func _plan_pick(feasible: Array, dir: float, traj: Dictionary,
 				"board": bool(f.get("board", false)),
 				"land_x": float(f.get("land_x", -1.0)),
 				"land_y": float(f.get("land_y", -1.0)),
+				"step_back": bool(f.get("step_back", false)),
 				"marginal": marg}
 	var past_last: Array = []
 	for f in feasible:
@@ -3186,6 +3423,11 @@ func _active_window(level: Dictionary, feet: Vector2, dir: float,
 				continue
 			if r.position.y + r.size.y <= feet.y - PLAN_MAX_RISE - 12.0 \
 					or r.position.y > feet.y + 3.0:
+				continue
+			# Lane P: walk-under column — its bottom clears the
+			# hero's head (hanging spiked column), so it is not
+			# the governing obstacle; the hero runs under it.
+			if r.position.y + r.size.y <= feet.y - _plan_height():
 				continue
 			if (dir > 0.0 and ce < col_entry) \
 					or (dir < 0.0 and ce > col_entry):
@@ -4024,6 +4266,7 @@ func _compute_plan(level: Dictionary, feet: Vector2,
 				"land_vx": float(fl["land_vx"]),
 				"runup": _plan_entry_dist(entry, float(fl["land_x"]), dir),
 				"brake_x": -1.0,
+				"step_back": bool(cand.get("step_back", false)),
 				"t_land": t0 + float(fl.get("land_frame", 0)) * PLAN_DT})
 	var picked: Dictionary = _plan_pick(feasible, dir, traj, cache,
 			lethal, solids, door_x, t0, timed, flight_solids, active_win)
@@ -4038,7 +4281,15 @@ func _compute_plan(level: Dictionary, feet: Vector2,
 	for ci in range(cands.size()):
 		var cand2: Dictionary = cands[ci]
 		var fail_at: int = int(fail_frames.get(ci, 999))
-		for bf in [8, 12, 16, 20, 24, 28, 32, 36, 40, 44]:
+		# Lane P: brake at EVERY frame 8..44, not just the 4-frame grid.
+		# A chained landing window can be narrower than one lattice
+		# step (L140: the strip jump must land in [277.5, 281.2] to
+		# take the column jump; the 4-frame grid lands at 276.55
+		# (lethal, 1 px strip overlap) or 284.65 (past the window),
+		# while bf=21 lands at 280.6). Brake landings are one
+		# lattice step apart on the full grid, so any window >= 4.05
+		# px wide is hittable. Cost is bounded by the memo (§1b).
+		for bf in range(8, 45):
 			if bf > fail_at and fail_frames.has(ci):
 				continue
 			var horiz2: Dictionary = _plan_dx_braked(float(cand2["vx"]),
@@ -4067,6 +4318,7 @@ func _compute_plan(level: Dictionary, feet: Vector2,
 					"land_vx": float(fl2["land_vx"]),
 					"runup": _plan_entry_dist(entry2, float(fl2["land_x"]), dir),
 					"brake_x": brake_x,
+					"step_back": bool(cand2.get("step_back", false)),
 					"t_land": t0 + float(fl2.get("land_frame", 0)) * PLAN_DT})
 	var bp: Dictionary = _plan_pick(braked, dir, traj, cache, lethal,
 			solids, door_x, t0, timed, flight_solids, active_win)
@@ -4192,6 +4444,12 @@ func _decide(level: Dictionary) -> Dictionary:
 	var timed_ahead: bool = false
 	var timed_saw_ahead: bool = false
 	for shape in _lethal_shapes(level):
+		# Lane P: walk-under — a hazard whose bottom clears the
+		# hero's head is not a jump trigger (spiked columns
+		# hanging from a bar, down-spikes under a beam); the hero
+		# runs under it. Jumping would rise into it.
+		if _shape_bottom(shape) <= feet.y - _plan_height():
+			continue
 		if _shape_hits_rect(shape, probe):
 			hazard_ahead = true
 			# P6: a fully-landed triggered pillar never rises again,
@@ -4379,6 +4637,9 @@ func _decide(level: Dictionary) -> Dictionary:
 			if bool(plan.get("ok", false)):
 				_plan_x = float(plan["takeoff"])
 				_plan_brake_x = float(plan.get("brake_x", -1.0))
+				# Lane P: step-back plan — the takeoff is behind
+				# the current stance; _decide walks back to it.
+				_plan_step_back = bool(plan.get("step_back", false))
 				_plan_t_dep = float(plan.get("t_dep", -1.0))
 				_plan_timed_kind = str(plan.get("timed_kind", ""))
 				_plan_board = bool(plan.get("board", false))
@@ -4538,6 +4799,13 @@ func _decide(level: Dictionary) -> Dictionary:
 			and ((_last_dir > 0.0 and feet.x >= _flight_brake_x) \
 			or (_last_dir < 0.0 and feet.x <= _flight_brake_x)):
 		dir = 0.0
+	# Lane P: step-back plan — walk back to the takeoff (behind
+	# the stance) instead of toward the door. Only on the floor
+	# and only while the plan holds (jump stays false here; the
+	# jump fires from _plan_reached at the takeoff).
+	if _plan_active and _plan_step_back and on_floor \
+			and not _plan_reached(feet, dir):
+		dir = 1.0 if _plan_x > feet.x else -1.0
 	return {"dir": dir, "jump": jump, "waiting": false}
 
 
@@ -4569,6 +4837,7 @@ func _reset_attempt_state(wait_offset: float) -> void:
 	_has_moved_away = false
 	_deaths_seen = -1
 	_plan_active = false
+	_plan_step_back = false
 	_plan_brake_x = -1.0
 	_plan_next_check_x = -1e9
 	_plan_prev_on_floor = false
@@ -4668,6 +4937,14 @@ func _play_level(level: Dictionary, mode: String, steps_cap: int,
 				"steps": 0, "deaths": 0, "reason": contract_error,
 				"notes": "rejected before play: unknown kind/type",
 				"attempts": []}
+	# Lane A (v1.0.9): rule-7 slab designation, reported per level
+	# so a floating-slab run is visible in the JSON report.
+	var slab_ok: bool = _main_floor_slab_ok(level)
+	var slab_floating: bool = false
+	var mf_idx: int = _main_floor_index(level)
+	if mf_idx >= 0:
+		var mf: Dictionary = (level.get("platforms", []) as Array)[mf_idx]
+		slab_floating = absf(float(mf["y"]) + float(mf["h"]) - FLOOR_Y) > 4.0
 	var period: float = _trap_period(level)
 	var offsets: Array = [0.0, 0.25, 0.5, 0.75]
 	var attempts: Array = []
@@ -4719,6 +4996,8 @@ func _play_level(level: Dictionary, mode: String, steps_cap: int,
 					"strategy": si, "steps": int(attempt["steps"]),
 					"deaths": deaths, "reason": "door",
 					"notes": notes, "attempts": attempts,
+					"main_floor_slab": slab_ok,
+					"main_floor_floating": slab_floating,
 					"marginal": bool(attempt.get("marginal", false)),
 					"blocked_by": str(attempt.get("blocked_by", ""))}
 		if str(attempt["outcome"]) == "died":
@@ -4729,6 +5008,8 @@ func _play_level(level: Dictionary, mode: String, steps_cap: int,
 			"deaths": deaths,
 			"reason": str(last.get("outcome", "failed")),
 			"notes": notes, "attempts": attempts,
+			"main_floor_slab": slab_ok,
+			"main_floor_floating": slab_floating,
 			"marginal": bool(last.get("marginal", false)),
 			"blocked_by": str(last.get("blocked_by", ""))}
 

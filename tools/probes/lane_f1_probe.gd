@@ -6,6 +6,16 @@
 #
 # Usage:
 #   godot --headless --fixed-fps 60 --path <project> -s <abs path>/lane_f1_probe.gd
+#
+# CHAPTER-AWARE (Lane P, v1.0.9 condition (a)): the map builds ONE
+# chapter's door nodes per view (Ch.1 16, Ch.2 14, Ch.3 14 + bonus
+# node on Ch.3 only). _write_stars() sets highest_unlocked = 0, so
+# the map opens on Ch.1 by default — the bonus node does NOT exist
+# there. Both bonus blocks below switch to Ch.3 via _apply_chapter
+# (probe-safe, in-place rebuild + frame awaits) BEFORE reading
+# _bonus_nodes; f1-map asserts the Ch.1 count (16) plus a
+# sum-across-chapters == 44, and f1-bonus-ch1 asserts 0 bonus nodes
+# on Ch.1 (bonus-absent-off-Ch.3 is part of the design).
 extends SceneTree
 
 var _fails: Array[String] = []
@@ -109,6 +119,15 @@ func _remove(inst: Node) -> void:
 		inst.queue_free()
 	await process_frame
 	await process_frame
+
+
+# Chapter switch the probe-safe way: _apply_chapter rebuilds the map
+# in place (synchronous) and calls _scroll_to_current, which awaits
+# 2 process frames — so await frames after the call.
+func _switch_chapter(map_inst: Node, chapter: int) -> void:
+	map_inst.call("_apply_chapter", chapter)
+	for f in range(5):
+		await process_frame
 
 
 func _run() -> void:
@@ -219,21 +238,36 @@ func _run() -> void:
 	_remove(game_inst)
 
 	# --- 5. bonus door: locked at 0 stars, open at 50 ---------------
+	# Chapter-aware (Lane P C4(iv)): _write_stars(0) sets
+	# highest_unlocked = 0, so the map opens on Ch.1 by default —
+	# where the bonus node does NOT exist by design (it lives on
+	# the Ch.3 view only). Assert that first, then switch to Ch.3
+	# via _apply_chapter before reading _bonus_nodes.
 	_write_stars(0)
 	TTState.return_door = -1
 	var map0: Node = load("res://scenes/map.tscn").instantiate()
 	root.add_child(map0)
 	for i in range(10):
 		await process_frame
+	_check("f1-bonus-ch1: Ch.1 view has 0 bonus nodes (bonus lives on Ch.3 only)",
+		_bonus_nodes(map0).size() == 0, "bonus=" + str(_bonus_nodes(map0).size()))
+	_check("f1-map: Ch.1 view has exactly 16 main door nodes",
+		_door_nodes(map0).size() == 16, "nodes=" + str(_door_nodes(map0).size()))
+	var f1_sum := 0
+	for ch in [1, 2, 3]:
+		await _switch_chapter(map0, ch)
+		f1_sum += _door_nodes(map0).size()
+	_check("f1-map-sum: door nodes summed across Ch.1+Ch.2+Ch.3 == 44",
+		f1_sum == 44, "sum=" + str(f1_sum))
+	await _switch_chapter(map0, 3)
 	var bnodes0 := _bonus_nodes(map0)
-	_check("f1-bonus: exactly 1 bonus node on the map", bnodes0.size() == 1)
+	_check("f1-bonus: exactly 1 bonus node on the Ch.3 map", bnodes0.size() == 1)
 	if bnodes0.size() == 1:
 		_check("f1-bonus: locked at 0 stars", bool(bnodes0[0].get("locked")))
 	map0.call("open_bonus_picker")
 	await process_frame
 	_check("f1-bonus: locked picker never opens",
 		not bool((map0.get("_bonus_picker") as Control).visible))
-	_check("f1-map: still exactly 44 main door nodes", _door_nodes(map0).size() == 44)
 	_remove(map0)
 
 	_write_stars(50)
@@ -242,6 +276,12 @@ func _run() -> void:
 	root.add_child(map50)
 	for i in range(10):
 		await process_frame
+	# Default view is Ch.1 (highest 0) — the bonus node does not
+	# exist there. Switch to Ch.3 BEFORE reading _bonus_nodes, or
+	# the bnodes50.size() == 1 guard below can never open.
+	await _switch_chapter(map50, 3)
+	_check("f1-bonus-ch3: map switched to Ch.3 before reading bonus nodes",
+		int(map50.get("_chapter")) == 3, "chapter=" + str(map50.get("_chapter")))
 	var bnodes50 := _bonus_nodes(map50)
 	var bonus_open_ok := false
 	if bnodes50.size() == 1:

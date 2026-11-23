@@ -20,6 +20,18 @@ extends Control
 # After a win/skip, game.gd sets TTState.return_door and the map
 # re-opens that door's picker on top of the map; cold start and
 # pause/ESC exits show a plain map (return_door defaults to -1).
+# Lane U4 (M5 chapters): the map is split into 3 chapters (Ch.1
+# doors 1-16, Ch.2 doors 17-30, Ch.3 doors 31-44, TTFeatures table);
+# chapter tabs in the header switch the island view, each chapter
+# with its own island palette, and a horizontal chapter wipe
+# (ChapterWipe, left/right panels — a wipe variant, NOT the mouth
+# shape) covers the switch. All 44 doors stay reachable; unlock
+# derivation (highest_unlocked) is unchanged. Lane U4 (M2): a skull
+# counter (SkullCounter, n/5 for the viewed chapter) sits under the
+# STARS label. Lane U4 (M8): a chapter-complete overlay opens when
+# TTState.chapter_complete is set by a win (original humour text +
+# the chapter's death count); for Chapter 3 it sets
+# TTState.pending_credits so Lane U5's credits open after it (N4).
 
 const NODES_PER_ROW := 9
 const ROW_H := 140.0
@@ -337,6 +349,51 @@ class BonusDoorNode extends Control:
 			draw_colored_polygon(pts, Color.html("FFD23F"))
 
 
+# One small hidden arched door (Lane U5, M12). Same arch language as
+# DoorNode (circle + jambs + outline) at 44x56 with NO number and NO
+# label: it sits in the settings panel's bottom-right corner and
+# opens the bonus door. Release-activated like the other map nodes,
+# so a drag never fires it.
+class SecretDoorButton extends Control:
+	signal pressed
+
+	var _press_pos := Vector2.ZERO
+	var _press_inside := false
+
+	func _ready() -> void:
+		mouse_filter = Control.MOUSE_FILTER_STOP
+		focus_mode = Control.FOCUS_NONE
+
+	func _gui_input(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				_press_inside = true
+				_press_pos = event.position
+			else:
+				var fire: bool = _press_inside and Rect2(Vector2.ZERO, size).has_point(event.position) and event.position.distance_to(_press_pos) <= 16.0
+				_press_inside = false
+				if fire:
+					pressed.emit()
+
+	func _draw() -> void:
+		var cx := size.x * 0.5
+		var aw := 40.0
+		var ah := 52.0
+		var ax := cx - aw * 0.5
+		var ay := 2.0
+		var rad := aw * 0.5
+		var cy := ay + rad
+		var fill := Color.html("2B0A8A")
+		var outline_col := Color(1, 1, 1, 0.85)
+		draw_circle(Vector2(cx, cy), rad, fill)
+		draw_rect(Rect2(ax, cy, aw, ah - rad), fill)
+		draw_arc(Vector2(cx, cy), rad, PI, TAU, 20, outline_col, 2.5, true)
+		draw_line(Vector2(ax, cy), Vector2(ax, ay + ah), outline_col, 2.5, true)
+		draw_line(Vector2(ax + aw, cy), Vector2(ax + aw, ay + ah), outline_col, 2.5, true)
+		# Tiny gold knob so the arch reads as a door at 1x.
+		draw_circle(Vector2(cx + 10.0, cy + 16.0), 3.0, Color.html("FFD23F"))
+
+
 # Organic island + crack path behind the nodes. Never interactive.
 # The island is ONE smooth blob polygon: per row, the node x-range
 # widened by a wobbly margin, capped top and bottom — so navy
@@ -505,6 +562,118 @@ class MapArt extends Control:
 			draw_arc(current_centre, r, 0, TAU, 40, rc, 3.0, true)
 
 
+# Lane U4 (M2): skull + "n/5" counter for one chapter. Code-drawn
+# skull (white cranium, dark-red outline/eyes/jaw — the same skull
+# language as the HUD row) with yellow pixel text right-aligned in
+# the control; the skull sits immediately left of the text.
+class SkullCounter extends Control:
+	var n := 0
+	var total := 5
+	var text_col := Color(1.0, 0.824, 0.247)
+
+	func set_keys(p_n: int, p_total: int) -> void:
+		total = maxi(1, p_total)
+		n = clampi(p_n, 0, total)
+		queue_redraw()
+
+	func keys_text() -> String:
+		return str(n) + "/" + str(total)
+
+	func _draw() -> void:
+		var t := keys_text()
+		var tw := TTPixelFont.text_width(t, 3)
+		var tx := size.x - tw
+		var sc := Vector2(tx - 30.0, size.y * 0.5 - 2.0)
+		draw_circle(sc, 8.0, Color(0.43, 0.04, 0.04))
+		draw_circle(sc, 7.0, Color.WHITE)
+		draw_rect(Rect2(sc.x - 4.0, sc.y + 5.0, 8.0, 6.0), Color(0.43, 0.04, 0.04))
+		draw_rect(Rect2(sc.x - 3.0, sc.y + 5.0, 6.0, 5.0), Color.WHITE)
+		draw_line(Vector2(sc.x - 1.0, sc.y + 5.0), Vector2(sc.x - 1.0, sc.y + 10.0), Color(0.43, 0.04, 0.04), 1.0, true)
+		draw_line(Vector2(sc.x + 1.0, sc.y + 5.0), Vector2(sc.x + 1.0, sc.y + 10.0), Color(0.43, 0.04, 0.04), 1.0, true)
+		draw_circle(sc + Vector2(-2.8, -1.0), 1.8, Color(0.43, 0.04, 0.04))
+		draw_circle(sc + Vector2(2.8, -1.0), 1.8, Color(0.43, 0.04, 0.04))
+		TTPixelFont.draw_text(self, t, Vector2(0, (size.y - 21.0) * 0.5), 3, text_col, HORIZONTAL_ALIGNMENT_RIGHT, size.x)
+
+
+# Lane U4 (M5): the world-change transition. An ORIGINAL wipe
+# variant: two panels slide in from the LEFT and RIGHT edges to
+# cover the screen (TTWipe slides top/bottom), then slide back out
+# to reveal — with a thin yellow leading edge, in the target
+# chapter's trap colour. Our own design (NOT the reference's mouth
+# shape). Awaitable like TTWipe: `await wipe.cover()` /
+# `await wipe.reveal()`. Never blocks input (mouse_filter IGNORE);
+# process_mode ALWAYS so it animates across pause boundaries.
+class ChapterWipe extends Control:
+	signal cover_finished
+	signal reveal_finished
+
+	var panel_col := Color(0.43, 0.04, 0.04)
+	var edge_col := Color(1.0, 0.824, 0.247)
+	var _frac := 0.0
+	var _animating := false
+	var _anim_t := 0.0
+	var _anim_dur := 0.15
+	var _anim_dir := 0  # +1 covering, -1 revealing
+
+	func _init() -> void:
+		process_mode = Node.PROCESS_MODE_ALWAYS
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		position = Vector2.ZERO
+		size = Vector2(1280, 720)
+		z_index = 200
+
+	func set_colors(col: Color) -> void:
+		panel_col = col
+		queue_redraw()
+
+	func cover(dur: float = 0.15) -> void:
+		_animating = true
+		_anim_t = 0.0
+		_anim_dur = maxf(0.01, dur)
+		_anim_dir = 1
+		set_process(true)
+		await cover_finished
+
+	func reveal(dur: float = 0.16) -> void:
+		_frac = 1.0
+		_animating = true
+		_anim_t = 0.0
+		_anim_dur = maxf(0.01, dur)
+		_anim_dir = -1
+		set_process(true)
+		queue_redraw()
+		await reveal_finished
+
+	func _process(delta: float) -> void:
+		if not _animating:
+			set_process(false)
+			return
+		_anim_t += delta
+		var f := clampf(_anim_t / _anim_dur, 0.0, 1.0)
+		var e := 1.0 - (1.0 - f) * (1.0 - f) if _anim_dir == 1 else f * f
+		_frac = e if _anim_dir == 1 else 1.0 - e
+		queue_redraw()
+		if f >= 1.0:
+			_animating = false
+			set_process(false)
+			if _anim_dir == 1:
+				cover_finished.emit()
+			else:
+				reveal_finished.emit()
+
+	func _draw() -> void:
+		if _frac <= 0.0:
+			return
+		var half := 640.0 * _frac
+		# Left panel slides in from x=0; right panel from x=1280.
+		draw_rect(Rect2(0, 0, half, 720), panel_col)
+		draw_rect(Rect2(1280 - half, 0, half, 720), panel_col)
+		if _frac < 1.0:
+			# Thin yellow leading edges where the panels meet the scene.
+			draw_rect(Rect2(half - 2.0, 0, 4.0, 720), edge_col)
+			draw_rect(Rect2(1280 - half - 2.0, 0, 4.0, 720), edge_col)
+
+
 var _levels: Array = []
 var _total := 0
 var _highest := 0
@@ -564,6 +733,34 @@ var _daily_status2_label: TTPixelLabel = null
 var _nightmare_overlay: Control = null
 var _nightmare_status1_label: TTPixelLabel = null
 var _nightmare_status2_label: TTPixelLabel = null
+# Lane U5: end screens (M7 credits, M9 celebration) + secret door (M12).
+var _credits: Control = null
+var _celebration: Control = null
+var _celebration_kind_label: TTPixelLabel = null
+var _celebration_kind := ""
+var _secret_door: SecretDoorButton = null
+# Lane U5 (M4 speedrun): applied after U4's chapter API landed
+# (see M4-SPEEDRUN-STUB.md). Overlay + rows built by
+# _build_speedrun_overlay; _speedrun_rows holds {"button", "label",
+# "chapter"} per chapter row.
+var _speedrun_overlay: Control = null
+var _speedrun_rows: Array = []
+# Lane U4 (M5 chapters + M2 keys + M8 chapter-complete).
+var _chapter := 1
+var _chapter_tabs: Array = []
+var _chapter_switching := false
+var _chapter_wipe: ChapterWipe = null
+var _skull_counter: SkullCounter = null
+var _best_label: TTPixelLabel = null
+var _m8: Control = null
+var _m8_title: TTPixelLabel = null
+var _m8_sub: TTPixelLabel = null
+var _m8_line1: TTPixelLabel = null
+var _m8_line2: TTPixelLabel = null
+var _m8_deaths: TTPixelLabel = null
+var _m8_closer: TTPixelLabel = null
+var _m8_chapter := 0
+var _pending_return_door := -1
 
 
 func _ready() -> void:
@@ -650,6 +847,17 @@ func _ready() -> void:
 	_nightmare_btn.pressed.connect(_on_nightmare_button)
 	add_child(_nightmare_btn)
 	_refresh_mode_buttons()
+	# Lane U4 (M5): chapter tabs as a third header row on the LEFT
+	# (x 16..452, y 148): DAILY/NIGHTMARE end at y 140, the scroll
+	# viewport starts at y 214, and the centred logo plaque
+	# (x 530..750, y 4..180) plus its credit (y 186) leave this
+	# strip clear. (An earlier revision put the tabs at y 84,
+	# x 480..916 — straight across the middle of the logo plaque;
+	# screenshots caught it: the logo's middle band was hidden
+	# behind the tabs. Never place header controls in x 530..750,
+	# y 4..180.) The tabs are built on the default chapter 1 and
+	# re-filled once the save is loaded below.
+	_build_chapter_tabs()
 	var loaded := TTLevelData.load_levels()
 	if str(loaded.get("error", "")) != "":
 		var err := TTPixelLabel.new()
@@ -680,6 +888,10 @@ func _ready() -> void:
 	_nightmare_unlocked = TTNightmare.is_unlocked(progress)
 	_nightmare_armed = TTState.nightmare_armed and _nightmare_unlocked
 	_refresh_mode_buttons()
+	# Lane U4: the map opens on the chapter holding the current door
+	# (the door `highest_unlocked` sits in — never stored).
+	_chapter = TTFeatures.chapter_of_door(TTDoorMap.door_of(_highest))
+	_refresh_chapter_tabs()
 	# Star count, top-right under the SKINS button: right-aligned so
 	# it never touches the centred "Made by Ahmed" credit (ends ~x745).
 	_stars_label = TTPixelLabel.new()
@@ -690,6 +902,14 @@ func _ready() -> void:
 	_stars_label.width = 280.0
 	_stars_label.position = Vector2(980, 84)
 	add_child(_stars_label)
+	# Lane U4 (M2): skull n/5 for the viewed chapter, under STARS
+	# (y 112..140, above the scroll viewport at y 148/214).
+	_skull_counter = SkullCounter.new()
+	_skull_counter.position = Vector2(980, 112)
+	_skull_counter.size = Vector2(280, 28)
+	_skull_counter.text_col = _bg_col
+	add_child(_skull_counter)
+	_refresh_skull_counter()
 	# Unlock derives from highest_unlocked (index), never completed.
 	_build_map()
 	_build_settings()
@@ -700,12 +920,53 @@ func _ready() -> void:
 	_build_stats()
 	_build_daily_overlay()
 	_build_nightmare_overlay()
+	_build_credits()
+	_build_celebration()
+	_build_speedrun_overlay()
+	_build_chapter_complete()
 	_scroll_to_current()
 	_maybe_open_return_door()
+	# Lane V (M3): "Best --:--" timer, bottom-left of the map, matching the
+	# official Ch.1 map (frames-31/f002). Shows the fastest completed level
+	# time; "--:--" when no level has a best time yet. Added last so it
+	# overlays the map scroll content, like the official's label.
+	_best_label = TTPixelLabel.new()
+	var _fastest: Dictionary = TTFeatures.fastest_level(progress)
+	if _fastest.is_empty():
+		_best_label.text = "Best --:--"
+	else:
+		_best_label.text = "Best " + TTFeatures.format_time(float(_fastest.get("time", 0.0)))
+	_best_label.pixel_size = 3
+	# Lane U3 (M3 fix): _bg_col (#E8871E) is ALSO the island fill, so the
+	# label was invisible on the orange island (verified: fresh vs
+	# seeded map screenshots differ by 0 px in the label box). DARK_INK
+	# is the map's own dark ink for light fills (see _number_col_for);
+	# the map palette is fixed (palette 0), so the island is always
+	# this orange and dark ink is always readable on it.
+	_best_label.color = DARK_INK
+	_best_label.align = HORIZONTAL_ALIGNMENT_LEFT
+	_best_label.width = 300.0
+	_best_label.position = Vector2(16, 684)
+	add_child(_best_label)
+	# Lane U5 (M4): "Speedrun" button, bottom-left above the
+	# Best label (official Ch.2 map, frames-17/f001). Applied
+	# after U4's chapter API landed (see M4-SPEEDRUN-STUB.md).
+	var speedrun_btn := _make_text_button("SPEEDRUN", Vector2(16, 612), Vector2(220, 56), 22, _bg_col, _trap_col)
+	speedrun_btn.pressed.connect(open_speedrun)
+	add_child(speedrun_btn)
 	# Original wipe reveal on entering the map.
 	_wipe = TTWipe.new()
 	add_child(_wipe)
 	_wipe.reveal()
+	# Lane U5: end screens (M7/M9) are checked last, in the same
+	# frame as the _maybe_open_return_door call above — its 2-frame
+	# await has not resumed yet, so stashing return_door inside the
+	# check still suppresses the auto-picker.
+	_check_end_game_screens()
+	# Lane U4 (M5): the chapter wipe (left/right panels) is built
+	# once and reused for every chapter switch.
+	_chapter_wipe = ChapterWipe.new()
+	add_child(_chapter_wipe)
 
 
 func _node_pos(idx: int) -> Vector2:
@@ -724,11 +985,23 @@ func _node_pos(idx: int) -> Vector2:
 
 
 func _build_map() -> void:
-	# 44 door nodes, 9 per row (5 rows); content height follows the
-	# door rows, and MapArt adapts from the centres automatically.
-	var door_total := TTDoorMap.door_count()
-	var rows := (door_total + NODES_PER_ROW - 1) / NODES_PER_ROW
+	# Lane U4 (M5): ONE chapter's door nodes (9 per row); content
+	# height follows this chapter's rows, and MapArt adapts from the
+	# centres automatically. Node positions are CHAPTER-LOCAL
+	# (_node_pos(local index)), so every chapter's island starts at
+	# the top. All 44 doors stay reachable — the tabs switch the
+	# view, nothing is ever removed from the game. Unlock derivation
+	# (highest_unlocked) is unchanged. Called once in _ready and
+	# again on every chapter switch (the old ScrollContainer is
+	# freed first). The bonus door (45th) lives in the Chapter 3
+	# view only (end-game content, locked until 50 stars).
+	var doors: Array = TTFeatures.chapter_doors(_chapter)
+	var rows := (doors.size() + NODES_PER_ROW - 1) / NODES_PER_ROW
 	_content_h = GRID_Y0 + float(rows) * ROW_H + 100.0
+	if _scroll != null:
+		remove_child(_scroll)
+		_scroll.queue_free()
+		_scroll = null
 	_scroll = ScrollContainer.new()
 	# Scroll viewport starts BELOW the header credit: with the logo
 	# the credit glyphs end ~y207, so y214 clears it by 7px (was
@@ -741,25 +1014,37 @@ func _build_map() -> void:
 	content.custom_minimum_size = Vector2(1280, _content_h)
 	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_scroll.add_child(content)
+	# Lane U4 (M5): per-chapter map palette (TTFeatures chapter
+	# table -> tuning palette): the ISLAND changes colour per
+	# chapter; the outer background + header stay palette 0 (their
+	# contrast is verified as-is). Ch.1 orange/purple, Ch.2
+	# pink/dark-red, Ch.3 cream/brown.
+	var ch_pal: Dictionary = TTuning.palette(_tuning, TTFeatures.chapter_palette(_chapter))
+	var island_col := TTuning.col(str(ch_pal.get("bg", "#E8871E")))
+	var island_trap := TTuning.col(str(ch_pal.get("trap", "#2B0A8A")))
 	var art := MapArt.new()
-	art.island_col = _bg_col
-	art.island_edge_col = _bg_col.darkened(0.25)
-	art.dot_col = _trap_col
+	art.island_col = island_col
+	art.island_edge_col = island_col.darkened(0.25)
+	art.dot_col = island_trap
 	art.content_h = _content_h
 	art.position = Vector2.ZERO
 	art.size = Vector2(1280, _content_h)
 	art.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(art)
 	var centres: Array[Vector2] = []
-	for door in range(1, door_total + 1):
-		centres.append(_node_pos(door - 1) + Vector2(NODE_W * 0.5, 62.0))
-	# Lane F1: the bonus door is the 45th trail stop (last slot of
-	# row 5), so the island + crack path include it like any door.
-	centres.append(_node_pos(door_total) + Vector2(NODE_W * 0.5, 62.0))
+	for li in range(doors.size()):
+		centres.append(_node_pos(li) + Vector2(NODE_W * 0.5, 62.0))
+	# Lane F1: the bonus door is the trail stop after this chapter's
+	# last door (Chapter 3 only), so the island + crack path include
+	# it like any door.
+	if _chapter == 3:
+		centres.append(_node_pos(doors.size()) + Vector2(NODE_W * 0.5, 62.0))
 	art.centres = centres
 	var current_door := TTDoorMap.door_of(_highest)
-	art.current_centre = centres[current_door - 1] if not centres.is_empty() else Vector2.ZERO
-	for door in range(1, door_total + 1):
+	var current_li := doors.find(current_door)
+	art.current_centre = centres[current_li] if current_li >= 0 and not centres.is_empty() else Vector2.ZERO
+	for li in range(doors.size()):
+		var door: int = doors[li]
 		var first := TTDoorMap.door_first_index(door)
 		var trap := TTuning.col(str(TTuning.palette(_tuning, TTDoorMap.door_palette(door)).get("trap", "#2B0A8A")))
 		var btn := DoorNode.new()
@@ -781,34 +1066,35 @@ func _build_map() -> void:
 			btn.fill = trap
 			btn.outline_col = Color.WHITE
 			btn.number_col = _number_col_for(btn.fill, false)
-		btn.position = _node_pos(door - 1)
+		btn.position = _node_pos(li)
 		btn.size = Vector2(NODE_W, NODE_H)
 		btn.pressed.connect(_on_door_pressed.bind(door))
 		content.add_child(btn)
-	# Lane F1: bonus door (45th). Locked until 50 stars; gold fill
-	# when unlocked (dark number ink — gold on white is unreadable),
-	# dimmed + lock when locked; done when all 5 bonus stages are done.
-	var bonus_unlocked := TTSkins.bonus_unlocked(_stars_count)
-	var bonus_btn := BonusDoorNode.new()
-	bonus_btn.locked = not bonus_unlocked
-	bonus_btn.current = false
-	bonus_btn.done = not _bonus_levels.is_empty()
-	for idx in range(_bonus_levels.size()):
-		if not _bonus_completed.has(str(_bonus_levels[idx].get("id", ""))):
-			bonus_btn.done = false
-			break
-	if bonus_btn.locked:
-		bonus_btn.fill = Color.html("FFD23F").lerp(_bg_col, 0.55)
-		bonus_btn.outline_col = Color(1, 1, 1, 0.55)
-		bonus_btn.number_col = Color(0.10, 0.04, 0.35, 0.75)
-	else:
-		bonus_btn.fill = Color.html("FFD23F")
-		bonus_btn.outline_col = Color.WHITE
-		bonus_btn.number_col = Color(0.10, 0.04, 0.35)
-	bonus_btn.position = _node_pos(door_total)
-	bonus_btn.size = Vector2(NODE_W, NODE_H)
-	bonus_btn.pressed.connect(_on_bonus_door_pressed)
-	content.add_child(bonus_btn)
+	if _chapter == 3:
+		# Lane F1: bonus door (45th). Locked until 50 stars; gold fill
+		# when unlocked (dark number ink — gold on white is unreadable),
+		# dimmed + lock when locked; done when all 5 bonus stages are done.
+		var bonus_unlocked := TTSkins.bonus_unlocked(_stars_count)
+		var bonus_btn := BonusDoorNode.new()
+		bonus_btn.locked = not bonus_unlocked
+		bonus_btn.current = false
+		bonus_btn.done = not _bonus_levels.is_empty()
+		for idx in range(_bonus_levels.size()):
+			if not _bonus_completed.has(str(_bonus_levels[idx].get("id", ""))):
+				bonus_btn.done = false
+				break
+		if bonus_btn.locked:
+			bonus_btn.fill = Color.html("FFD23F").lerp(_bg_col, 0.55)
+			bonus_btn.outline_col = Color(1, 1, 1, 0.55)
+			bonus_btn.number_col = Color(0.10, 0.04, 0.35, 0.75)
+		else:
+			bonus_btn.fill = Color.html("FFD23F")
+			bonus_btn.outline_col = Color.WHITE
+			bonus_btn.number_col = Color(0.10, 0.04, 0.35)
+		bonus_btn.position = _node_pos(doors.size())
+		bonus_btn.size = Vector2(NODE_W, NODE_H)
+		bonus_btn.pressed.connect(_on_bonus_door_pressed)
+		content.add_child(bonus_btn)
 	var credit := TTPixelLabel.new()
 	credit.text = "Made by Ahmed"
 	credit.pixel_size = 4
@@ -826,8 +1112,15 @@ func _scroll_to_current() -> void:
 	await get_tree().process_frame
 	if _scroll == null or not is_instance_valid(_scroll):
 		return
-	var y := _node_pos(TTDoorMap.door_of(_highest) - 1).y
-	var s := clampf(y - 180.0, 0.0, maxf(0.0, _content_h - 572.0))
+	# Lane U4: scroll to the current door when it is in the VIEWED
+	# chapter (chapter-local index); otherwise the top (a chapter
+	# the player has not reached yet has no current door in it).
+	var s := 0.0
+	var doors: Array = TTFeatures.chapter_doors(_chapter)
+	var li := doors.find(TTDoorMap.door_of(_highest))
+	if li >= 0:
+		var y := _node_pos(li).y
+		s = clampf(y - 180.0, 0.0, maxf(0.0, _content_h - 572.0))
 	# N1: snap so the top visible row is fully in view or fully
 	# hidden. The old s landed mid-row (e.g. s=160 left doors 1-9
 	# as ~10 px slivers at the top edge in map_progress.png).
@@ -846,7 +1139,7 @@ func _scroll_to_current() -> void:
 		var max_bottom := -1e9
 		for k in range(NODES_PER_ROW):
 			var idx := row * NODES_PER_ROW + k
-			if idx >= TTDoorMap.door_count():
+			if idx >= doors.size():
 				break
 			var ny := _node_pos(idx).y
 			min_top = minf(min_top, ny)
@@ -858,6 +1151,77 @@ func _scroll_to_current() -> void:
 				s = max_bottom
 			s = clampf(s, 0.0, maxf(0.0, _content_h - 572.0))
 	_scroll.scroll_vertical = s
+
+
+# --- Lane U4: chapters (M5) + map skull counter (M2) ---------------
+
+func _build_chapter_tabs() -> void:
+	# Three tabs in the free header stretch (x 480..916, y 84):
+	# DAILY/NIGHTMARE end at x 464, STARS starts at x 980. The
+	# no-logo fallback credit sits at y 84 too — but logo.png ships
+	# in the repo, so the fallback never triggers in a real build
+	# (noted in LANE-U4-REPORT.md).
+	_chapter_tabs = []
+	var labels: Array[String] = ["CH 1", "CH 2", "CH 3"]
+	for i in range(3):
+		var b := _make_text_button(labels[i], Vector2(16 + i * 148, 148), Vector2(140, 56), 26, _bg_col, _trap_col)
+		b.pressed.connect(_on_chapter_tab.bind(i + 1))
+		add_child(b)
+		_chapter_tabs.append({"button": b, "chapter": i + 1})
+	_refresh_chapter_tabs()
+
+
+func _refresh_chapter_tabs() -> void:
+	# Selected tab = gold fill (stands out from the other header
+	# buttons); unselected = the standard orange header fill.
+	for entry in _chapter_tabs:
+		var b: TTHUD.IconButton = entry["button"]
+		if int(entry["chapter"]) == _chapter:
+			b.fill = Color.html("FFD23F")
+		else:
+			b.fill = _bg_col
+		b.icon_col = _trap_col
+		b.queue_redraw()
+
+
+func _on_chapter_tab(chapter: int) -> void:
+	if chapter == _chapter or _chapter_switching:
+		return
+	await _switch_chapter(chapter, true)
+
+
+func _switch_chapter(chapter: int, animate: bool = true) -> void:
+	if chapter == _chapter or _chapter_switching:
+		return
+	_chapter_switching = true
+	if animate and _chapter_wipe != null:
+		# The wipe wears the TARGET chapter's trap colour.
+		var ch_pal: Dictionary = TTuning.palette(_tuning, TTFeatures.chapter_palette(chapter))
+		_chapter_wipe.set_colors(TTuning.col(str(ch_pal.get("trap", "#2B0A8A"))))
+		await _chapter_wipe.cover()
+		_apply_chapter(chapter)
+		if _chapter_wipe != null and is_instance_valid(_chapter_wipe):
+			await _chapter_wipe.reveal()
+	else:
+		_apply_chapter(chapter)
+	_chapter_switching = false
+
+
+func _apply_chapter(chapter: int) -> void:
+	_chapter = clampi(chapter, 1, TTFeatures.chapter_count())
+	_build_map()
+	_refresh_chapter_tabs()
+	_refresh_skull_counter()
+	_scroll_to_current()
+
+
+func _refresh_skull_counter() -> void:
+	if _skull_counter == null:
+		return
+	var data := TTProgress.load_progress()
+	_skull_counter.set_keys(
+		TTFeatures.chapter_keys_collected(data, _chapter),
+		TTFeatures.chapter_keys_total(_chapter))
 
 
 func _build_settings() -> void:
@@ -911,6 +1275,19 @@ func _build_settings() -> void:
 	_music_slider.value = TTAudio.get_music_volume()
 	_music_slider.value_changed.connect(_on_music_changed)
 	_settings.add_child(_music_slider)
+	# Lane U5 (M12 secret door): a small arched door tucked in the
+	# panel's bottom-right corner (916, 492, 44x56 — inside the
+	# 700x400 panel, clear of CLOSE at x530..750 and the music
+	# slider at x520..900/y362..410). No label, no button chrome:
+	# it reads as a little door in the panel corner, not a menu
+	# item. Opens the existing bonus door (45th, 50 stars) when
+	# unlocked; while locked it stays shut with no response.
+	_secret_door = SecretDoorButton.new()
+	_secret_door.name = "SecretDoor"
+	_secret_door.position = Vector2(916, 492)
+	_secret_door.size = Vector2(44, 56)
+	_secret_door.pressed.connect(_on_secret_door_pressed)
+	_settings.add_child(_secret_door)
 	var close := _make_text_button("CLOSE", Vector2(530, 472), Vector2(220, 64), 30, _trap_col, Color.html("FFD23F"))
 	close.pressed.connect(close_settings)
 	_settings.add_child(close)
@@ -938,6 +1315,17 @@ func _on_sound_toggle() -> void:
 
 func _on_music_changed(value: float) -> void:
 	TTAudio.set_music_volume(value)
+
+
+# Lane U5 (M12): the hidden settings door opens the bonus picker
+# (same picker as the 45th door node) — but only while the bonus
+# door is unlocked (50 stars). Locked: no response, the door stays
+# shut (a hidden door that announced itself would not be hidden).
+func _on_secret_door_pressed() -> void:
+	if not TTSkins.bonus_unlocked(_stars_count):
+		return
+	close_settings()
+	open_bonus_picker()
 
 
 func _make_text_button(text: String, pos: Vector2, size: Vector2, font_size: int, fill: Color, font_col: Color) -> TTHUD.IconButton:
@@ -1082,6 +1470,141 @@ func close_picker() -> void:
 	_picker_door = 0
 
 
+# --- Lane U4: chapter-complete end screen (M8) --------------------
+# Original humour text (own wording — NOT the official's "YOU
+# ESCAPED" line) + the player's death count FOR THAT CHAPTER
+# (chapter_deaths). Same dismissible overlay pattern as the picker
+# (dim + panel + CLOSE). Order pinned (N4): after L215 this M8
+# screen (Ch.3) shows FIRST; closing it sets
+# TTState.pending_credits so Lane U5's end-credits open after it.
+
+func _build_chapter_complete() -> void:
+	_m8 = Control.new()
+	_m8.position = Vector2.ZERO
+	_m8.size = Vector2(1280, 720)
+	_m8.visible = false
+	add_child(_m8)
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.5)
+	dim.position = Vector2.ZERO
+	dim.size = Vector2(1280, 720)
+	_m8.add_child(dim)
+	var panel := Panel.new()
+	panel.position = Vector2(290, 90)
+	panel.size = Vector2(700, 540)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = _bg_col.lightened(0.45)
+	sb.set_corner_radius_all(24)
+	panel.add_theme_stylebox_override("panel", sb)
+	_m8.add_child(panel)
+	_m8_title = TTPixelLabel.new()
+	_m8_title.text = "CHAPTER 1 COMPLETE!"
+	_m8_title.pixel_size = 6
+	_m8_title.color = _trap_col
+	_m8_title.align = HORIZONTAL_ALIGNMENT_CENTER
+	_m8_title.width = 700.0
+	_m8_title.position = Vector2(290, 112)
+	_m8.add_child(_m8_title)
+	_m8_sub = TTPixelLabel.new()
+	_m8_sub.text = ""
+	_m8_sub.pixel_size = 4
+	_m8_sub.color = _trap_col
+	_m8_sub.align = HORIZONTAL_ALIGNMENT_CENTER
+	_m8_sub.width = 700.0
+	_m8_sub.position = Vector2(290, 172)
+	_m8.add_child(_m8_sub)
+	_m8_line1 = TTPixelLabel.new()
+	_m8_line1.text = ""
+	_m8_line1.pixel_size = 4
+	_m8_line1.color = _trap_col
+	_m8_line1.align = HORIZONTAL_ALIGNMENT_CENTER
+	_m8_line1.width = 700.0
+	_m8_line1.position = Vector2(290, 232)
+	_m8.add_child(_m8_line1)
+	_m8_line2 = TTPixelLabel.new()
+	_m8_line2.text = ""
+	_m8_line2.pixel_size = 4
+	_m8_line2.color = _trap_col
+	_m8_line2.align = HORIZONTAL_ALIGNMENT_CENTER
+	_m8_line2.width = 700.0
+	_m8_line2.position = Vector2(290, 282)
+	_m8.add_child(_m8_line2)
+	_m8_deaths = TTPixelLabel.new()
+	_m8_deaths.text = ""
+	_m8_deaths.pixel_size = 3
+	_m8_deaths.color = _trap_col
+	_m8_deaths.align = HORIZONTAL_ALIGNMENT_CENTER
+	_m8_deaths.width = 700.0
+	_m8_deaths.position = Vector2(290, 342)
+	_m8.add_child(_m8_deaths)
+	_m8_closer = TTPixelLabel.new()
+	_m8_closer.text = ""
+	_m8_closer.pixel_size = 4
+	_m8_closer.color = _trap_col
+	_m8_closer.align = HORIZONTAL_ALIGNMENT_CENTER
+	_m8_closer.width = 700.0
+	_m8_closer.position = Vector2(290, 402)
+	_m8.add_child(_m8_closer)
+	var close := _make_text_button("CLOSE", Vector2(530, 556), Vector2(220, 56), 30, _trap_col, Color.html("FFD23F"))
+	close.pressed.connect(_on_chapter_complete_close)
+	_m8.add_child(close)
+
+
+func open_chapter_complete(chapter: int) -> void:
+	if _m8 == null:
+		return
+	_m8_chapter = clampi(chapter, 1, TTFeatures.chapter_count())
+	var data := TTProgress.load_progress()
+	var deaths := TTFeatures.chapter_deaths(data, _m8_chapter)
+	_m8_title.text = "CHAPTER " + str(_m8_chapter) + " COMPLETE!"
+	# Chapter 3's UI label is honestly "CHAPTER 3 - CONTINUATION"
+	# (a design label, NOT an official playlist chapter — N3).
+	_m8_sub.text = "CHAPTER 3 - CONTINUATION" if _m8_chapter == 3 else ""
+	match _m8_chapter:
+		1:
+			_m8_line1.text = "YOU SURVIVED EVERY TRAP."
+			_m8_line2.text = "THE TOWER IS BUILDING MORE."
+			_m8_closer.text = "HA! IT COUNTED EVERY ONE."
+		2:
+			_m8_line1.text = "TWO CHAPTERS DOWN. THE TOWER"
+			_m8_line2.text = "IS RUNNING OUT OF TRICKS."
+			_m8_closer.text = "OR IS IT? ONE LEFT. HA!"
+		_:
+			_m8_line1.text = "YOU BEAT THE WHOLE TOWER!"
+			_m8_line2.text = "THE DEVIL IS TAKING NOTES."
+			_m8_closer.text = "FREE AT LAST. HA HA HA!"
+	_m8_deaths.text = "YOU DIED " + str(deaths) + " TIMES IN CHAPTER " + str(_m8_chapter) + "."
+	for lab in [_m8_title, _m8_sub, _m8_line1, _m8_line2, _m8_deaths, _m8_closer]:
+		(lab as TTPixelLabel).queue_redraw()
+	_m8.visible = true
+
+
+func close_chapter_complete() -> void:
+	if _m8 != null:
+		_m8.visible = false
+
+
+func _on_chapter_complete_close() -> void:
+	var ch := _m8_chapter
+	close_chapter_complete()
+	_m8_chapter = 0
+	if ch == 3:
+		# N4: M8 (Ch.3 complete) FIRST, then M7 end-credits.
+		# U5 HOOK: Lane U5's open_credits() consumes
+		# TTState.pending_credits (set here, cleared there).
+		TTState.pending_credits = true
+		open_credits()
+		return
+	if _pending_return_door >= 1:
+		var door := _pending_return_door
+		_pending_return_door = -1
+		# The win advanced highest_unlocked into the NEXT chapter;
+		# go back to the played door's chapter (no wipe — the M8
+		# overlay just covered the screen) and open its picker.
+		_apply_chapter(TTFeatures.chapter_of_door(door))
+		open_picker(door)
+
+
 func _maybe_open_return_door() -> void:
 	# Win/skip return: after the map's 2-frame scroll settle, reopen
 	# the played door's picker on top of the map. The flag defaults
@@ -1091,6 +1614,19 @@ func _maybe_open_return_door() -> void:
 	await get_tree().process_frame
 	var door := TTState.return_door
 	TTState.return_door = -1
+	# Lane U4 (M8): a chapter-complete win opens the M8 overlay
+	# INSTEAD of the picker; the picker waits until the overlay
+	# closes (the played door is stored in _pending_return_door).
+	var ch := TTState.chapter_complete
+	TTState.chapter_complete = 0
+	if ch >= 1:
+		# Keep a door stashed by _check_end_game_screens (M7/M9):
+		# its return_door was already consumed there, so door is -1
+		# here and must NOT clobber the stash.
+		if door >= 1:
+			_pending_return_door = door
+		open_chapter_complete(ch)
+		return
 	if door == 45:
 		# Lane F1: bonus win/skip returns to the BONUS picker.
 		open_bonus_picker()
@@ -1117,6 +1653,7 @@ func _start_level(idx: int) -> void:
 	TTState.daily = false
 	TTState.daily_date = ""
 	TTState.nightmare = _nightmare_armed
+	TTState.speedrun_chapter = 0  # Lane U5 STUB (M4): a normal level never inherits a stale run flag.
 	TTState.level_index = idx
 	get_tree().paused = false
 	# Original wipe covers the map -> level transition.
@@ -1376,6 +1913,7 @@ func _start_bonus_level(idx: int) -> void:
 	TTState.bonus = true
 	TTState.daily = false
 	TTState.daily_date = ""
+	TTState.speedrun_chapter = 0  # Lane U5 STUB (M4): see _start_level.
 	TTState.nightmare = false
 	TTState.level_index = idx
 	get_tree().paused = false
@@ -1655,6 +2193,7 @@ func _start_daily() -> void:
 	TTState.daily = true
 	TTState.daily_date = TTDaily.today_string()
 	TTState.nightmare = false
+	TTState.speedrun_chapter = 0  # Lane U5 STUB (M4): see _start_level.
 	TTState.level_index = 0
 	get_tree().paused = false
 	if _wipe != null:
@@ -1714,3 +2253,307 @@ func open_nightmare_locked() -> void:
 func close_nightmare_overlay() -> void:
 	if _nightmare_overlay != null:
 		_nightmare_overlay.visible = false
+
+
+# --- Lane U5: end screens (M7 credits, M9 celebration) -------------
+# Original art/text throughout; nothing is copied from the official.
+# Credits wording is ours ("made by Ahmed" is the user's own credit
+# line, already on the map — the official's "LEVEL DEVIL by Adam
+# Corey aka @Unept" line is never used). The celebration keeps the
+# official's STRUCTURE (billboard + hill + house, checklist M9) with
+# our own drawing and our own words ("TOWER CLEAR!", never the
+# official's "You did it. you're Free." billboard).
+
+# Celebration backdrop: sky + sun + clouds + green hill + house +
+# trees + wooden billboard with a gold star. Drawn, never interactive.
+class CelebrationArt extends Control:
+	func _draw() -> void:
+		# Sun, top-left.
+		draw_circle(Vector2(100, 90), 42.0, Color.html("FFD23F"))
+		# Clouds: two puffs of overlapping white circles.
+		for c in [Vector2(250, 110), Vector2(950, 80)]:
+			var s := 1.0 if c.x < 500.0 else 0.8
+			draw_circle(c + Vector2(-26, 6) * s, 24.0 * s, Color(1, 1, 1, 0.9))
+			draw_circle(c, 30.0 * s, Color(1, 1, 1, 0.9))
+			draw_circle(c + Vector2(28, 8) * s, 22.0 * s, Color(1, 1, 1, 0.9))
+		# Green hill: one smooth mound, crest ~y530 at centre.
+		var hill := PackedVector2Array()
+		for i in range(33):
+			var x := float(i) * 1280.0 / 32.0
+			var y := 620.0 - 90.0 * sin(PI * x / 1280.0)
+			hill.append(Vector2(x, y))
+		hill.append(Vector2(1280, 720))
+		hill.append(Vector2(0, 720))
+		draw_colored_polygon(hill, Color.html("58A83C"))
+		# Billboard: long posts down to the hill + wooden board.
+		var post_col := Color.html("6B4423")
+		draw_rect(Rect2(470, 330, 10, 208), post_col)
+		draw_rect(Rect2(800, 330, 10, 208), post_col)
+		draw_rect(Rect2(440, 180, 400, 150), Color.html("8A5A2B"))
+		draw_rect(Rect2(440, 180, 400, 150), Color.html("6B4423"), false, 6.0)
+		# Gold star above the board.
+		var star := PackedVector2Array()
+		for p in TTStar.star_points(22.0, 9.0):
+			star.append(p + Vector2(640, 150))
+		draw_colored_polygon(star, Color.html("FFD23F"))
+		# House on the hill (base y545 meets the hill surface).
+		draw_rect(Rect2(860, 465, 120, 80), Color.html("C98A4B"))
+		var roof := PackedVector2Array([Vector2(850, 465), Vector2(990, 465), Vector2(920, 415)])
+		draw_colored_polygon(roof, Color.html("B03A2E"))
+		draw_rect(Rect2(910, 505, 24, 40), Color.html("5B3A1E"))
+		draw_rect(Rect2(875, 480, 20, 20), Color.html("FFD23F"))
+		# Trees: trunk + round canopy, bases on the hill surface.
+		for t in [Vector2(180, 582), Vector2(300, 559)]:
+			draw_rect(Rect2(t.x - 7, t.y - 40, 14, 40), Color.html("6B4423"))
+			draw_circle(Vector2(t.x, t.y - 62), 30.0, Color.html("3E7D2C"))
+			draw_circle(Vector2(t.x, t.y - 84), 22.0, Color.html("3E7D2C"))
+
+
+func _build_credits() -> void:
+	# M7 end-credits: the F3 overlay shell (dim + peach panel +
+	# title) with our own credit lines. CONTINUE marks the credits
+	# seen (one-shot) and opens whatever the return chain holds.
+	var shell := _overlay_shell("THE END")
+	_credits = shell["root"]
+	var lines: Array = [
+		["YOU FINISHED", 5, 190.0],
+		["ALL 215 LEVELS!", 5, 250.0],
+		["THANKS FOR PLAYING", 4, 305.0],
+		["TRAP TOWER", 5, 360.0],
+		["MADE BY AHMED", 4, 415.0],
+		["BUILT WITH GODOT", 3, 470.0],
+	]
+	for entry in lines:
+		var lab := TTPixelLabel.new()
+		lab.text = str(entry[0])
+		lab.pixel_size = int(entry[1])
+		lab.color = _trap_col
+		lab.align = HORIZONTAL_ALIGNMENT_CENTER
+		lab.width = 700.0
+		lab.position = Vector2(290, float(entry[2]))
+		_credits.add_child(lab)
+	var cont := _make_text_button("CONTINUE", Vector2(530, 556), Vector2(220, 56), 22, _trap_col, Color.html("FFD23F"))
+	cont.pressed.connect(close_credits)
+	_credits.add_child(cont)
+
+
+func open_credits() -> void:
+	TTState.pending_credits = false
+	if _credits != null:
+		_credits.visible = true
+
+
+func close_credits() -> void:
+	if _credits != null:
+		_credits.visible = false
+	TTProgress.mark_credits_seen()
+	_open_pending_return()
+
+
+func _build_celebration() -> void:
+	# M9 celebration: full-screen scene (sky + hill + house +
+	# billboard), NOT a panel overlay — it is a place, not a menu.
+	_celebration = Control.new()
+	_celebration.position = Vector2.ZERO
+	_celebration.size = Vector2(1280, 720)
+	_celebration.visible = false
+	add_child(_celebration)
+	var sky := ColorRect.new()
+	sky.color = Color.html("7EC8E3")
+	sky.position = Vector2.ZERO
+	sky.size = Vector2(1280, 720)
+	_celebration.add_child(sky)
+	var art := CelebrationArt.new()
+	art.position = Vector2.ZERO
+	art.size = Vector2(1280, 720)
+	art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_celebration.add_child(art)
+	var title := TTPixelLabel.new()
+	title.text = "TOWER CLEAR!"
+	title.pixel_size = 5
+	title.color = Color.WHITE
+	title.align = HORIZONTAL_ALIGNMENT_CENTER
+	title.width = 400.0
+	title.position = Vector2(440, 208)
+	_celebration.add_child(title)
+	_celebration_kind_label = TTPixelLabel.new()
+	_celebration_kind_label.text = "ALL 215 STARS!"
+	_celebration_kind_label.pixel_size = 4
+	_celebration_kind_label.color = Color.WHITE
+	_celebration_kind_label.align = HORIZONTAL_ALIGNMENT_CENTER
+	_celebration_kind_label.width = 400.0
+	_celebration_kind_label.position = Vector2(440, 268)
+	_celebration.add_child(_celebration_kind_label)
+	var thanks := TTPixelLabel.new()
+	thanks.text = "THANKS FOR PLAYING"
+	thanks.pixel_size = 3
+	thanks.color = Color.WHITE
+	thanks.align = HORIZONTAL_ALIGNMENT_CENTER
+	thanks.width = 1280.0
+	thanks.position = Vector2(0, 672)
+	_celebration.add_child(thanks)
+	var cont := _make_text_button("CONTINUE", Vector2(530, 600), Vector2(220, 56), 22, _trap_col, Color.html("FFD23F"))
+	cont.pressed.connect(close_celebration)
+	_celebration.add_child(cont)
+
+
+# M9 open: kind is "keys" (all 15 chapter keys, PRIMARY) or "stars"
+# (all 215 stars, FALLBACK). The screen names which one was achieved
+# (N5) — the billboard line is set here, not hard-coded.
+func open_celebration(kind: String) -> void:
+	if _celebration == null:
+		return
+	_celebration_kind = kind
+	if _celebration_kind_label != null:
+		if kind == "keys":
+			_celebration_kind_label.text = "ALL 15 KEYS!"
+		else:
+			_celebration_kind_label.text = "ALL 215 STARS!"
+		_celebration_kind_label.queue_redraw()
+	if _best_label != null:
+		_best_label.visible = false
+	_celebration.visible = true
+
+
+func close_celebration() -> void:
+	if _celebration != null:
+		_celebration.visible = false
+	if _best_label != null:
+		_best_label.visible = true
+	TTProgress.mark_celebration_seen(_celebration_kind)
+	_celebration_kind = ""
+	_open_pending_return()
+
+
+# N4 PINNED order: M8 chapter-complete (Ch.3) FIRST, then M7 credits.
+# Wired by the coordinator after U4 landed (23 Nov 2026): the final
+# end screen opens M8 for Chapter 3; M8's close handler chains
+# open_credits() via TTState.pending_credits (see
+# _on_chapter_complete_close). M8's screen is open_chapter_complete.
+func _show_final_end_screens() -> void:
+	open_chapter_complete(3)
+
+
+# Checked once at the end of _ready. M7 trigger: L215 completed +
+# credits not yet seen (any map open — the win return AND a veteran
+# player's first post-update open). M9 trigger: the N5 kind, when it
+# differs from the already-celebrated one. An end screen stashes the
+# return door and clears TTState so the auto-picker stays shut; the
+# picker opens from _open_pending_return when the screen closes.
+func _check_end_game_screens() -> void:
+	var data := TTProgress.load_progress()
+	var done: Array = data.get("completed", [])
+	if done.has("L215") and not bool(data.get("credits_seen", false)):
+		_pending_return_door = TTState.return_door
+		TTState.return_door = -1
+		_show_final_end_screens()
+		return
+	var kind := TTFeatures.celebration_kind(data)
+	if kind != "" and str(data.get("celebration_seen", "")) != kind:
+		_pending_return_door = TTState.return_door
+		TTState.return_door = -1
+		open_celebration(kind)
+
+
+# After an end screen closes: a still-pending celebration fires
+# first (so M7 credits are followed by M9 when both are owed), else
+# the stashed return door's picker opens (45 = bonus picker).
+func _open_pending_return() -> void:
+	var data := TTProgress.load_progress()
+	var kind := TTFeatures.celebration_kind(data)
+	if kind != "" and str(data.get("celebration_seen", "")) != kind:
+		open_celebration(kind)
+		return
+	var door := _pending_return_door
+	_pending_return_door = -1
+	if door == 45:
+		open_bonus_picker()
+	elif door >= 1:
+		open_picker(door)
+
+
+# --- Lane U5 (M4 speedrun) — APPLIED after U4 landed ---------------
+# Everything below calls U4's chapter API. Applied by the coordinator
+# after U4 landed, in this order: U5 applicable patches,
+# U4 chapter API, then this stub. See M4-SPEEDRUN-STUB.md.
+
+func _build_speedrun_overlay() -> void:
+	# One row per chapter: name + best speedrun time. Rows are
+	# re-filled with live save numbers on every open.
+	var shell := _overlay_shell("SPEEDRUN")
+	_speedrun_overlay = shell["root"]
+	_speedrun_rows = []
+	for ch in [1, 2, 3]:
+		var y := 190.0 + float(ch - 1) * 110.0
+		var b := _make_text_button("CHAPTER " + str(ch), Vector2(330, y), Vector2(280, 64), 26, _bg_col, _trap_col)
+		b.pressed.connect(_on_speedrun_chapter.bind(ch))
+		_speedrun_overlay.add_child(b)
+		var lab := TTPixelLabel.new()
+		lab.text = "BEST --:--"
+		lab.pixel_size = 4
+		lab.color = _trap_col
+		lab.align = HORIZONTAL_ALIGNMENT_RIGHT
+		lab.width = 300.0
+		lab.position = Vector2(640, y + 16)
+		_speedrun_overlay.add_child(lab)
+		_speedrun_rows.append({"button": b, "label": lab, "chapter": ch})
+	var close := _make_text_button("CLOSE", Vector2(530, 556), Vector2(220, 56), 30, _trap_col, Color.html("FFD23F"))
+	close.pressed.connect(close_speedrun)
+	_speedrun_overlay.add_child(close)
+
+
+func open_speedrun() -> void:
+	if _speedrun_overlay == null:
+		return
+	_fill_speedrun()
+	_speedrun_overlay.visible = true
+
+
+func close_speedrun() -> void:
+	if _speedrun_overlay != null:
+		_speedrun_overlay.visible = false
+
+
+func _fill_speedrun() -> void:
+	var data := TTProgress.load_progress()
+	for entry in _speedrun_rows:
+		var ch := int(entry["chapter"])
+		var lab: TTPixelLabel = entry["label"]
+		# U4's API is chapter_label (resolved at merge: the stub's
+		# expected chapter_name does not exist; the label is
+		# "Chapter 3 - Continuation" per N3 — hyphen, no em-dash,
+		# so the pixel font renders it).
+		lab.text = "BEST " + TTFeatures.speedrun_best_label(data, ch)
+		var b: TTHUD.IconButton = entry["button"]
+		b.text = str(TTFeatures.chapter_label(ch)).to_upper()
+		b.queue_redraw()
+		lab.queue_redraw()
+
+
+func _on_speedrun_chapter(chapter: int) -> void:
+	# Doors in order (U4's chapter_doors API).
+	var doors: Array = TTFeatures.chapter_doors(chapter)
+	if doors.is_empty():
+		return
+	# A locked chapter cannot start: its first door must be unlocked.
+	if TTDoorMap.door_first_index(int(doors[0])) > _highest:
+		return
+	_start_speedrun(chapter)
+
+
+func _start_speedrun(chapter: int) -> void:
+	# Doors in order (U4's chapter_doors API).
+	var doors: Array = TTFeatures.chapter_doors(chapter)
+	if doors.is_empty():
+		return
+	close_speedrun()
+	TTState.bonus = false
+	TTState.daily = false
+	TTState.daily_date = ""
+	TTState.nightmare = false
+	TTState.speedrun_chapter = chapter
+	TTState.level_index = TTDoorMap.door_first_index(int(doors[0]))
+	get_tree().paused = false
+	if _wipe != null:
+		await _wipe.cover()
+	get_tree().change_scene_to_file("res://scenes/game.tscn")

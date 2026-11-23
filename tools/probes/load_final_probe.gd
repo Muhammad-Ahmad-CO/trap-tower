@@ -75,7 +75,19 @@ func _run() -> void:
 		elif plats.is_empty():
 			failed.append(str(lv.get("id", "?")) + ": no platforms built")
 		elif hazards.is_empty():
-			failed.append(str(lv.get("id", "?")) + ": no hazards built (Run 2 ban)")
+			# v1.0.9 Lane F: the no-hazard-kind exception doors
+			# (D06/D15/D20/D36) hold ZERO hazards by design -- their
+			# mechanic platforms ARE the challenge. The probe enforces
+			# the SAME condition the checker + runtime validator do
+			# (TTLevelData._no_hazard_kind_exception: >= 3 mechanic
+			# platforms); a level that lost both hazards and mechanic
+			# platforms still fails here, as does any non-exempt door
+			# with no hazards. Never weaken: this is the exception,
+			# not an exemption from having a challenge.
+			if TTLevelData._no_hazard_kind_exception(lv):
+				built += 1
+			else:
+				failed.append(str(lv.get("id", "?")) + ": no hazards built (Run 2 ban)")
 		else:
 			built += 1
 		# Step one physics frame so node setup runs, then free.

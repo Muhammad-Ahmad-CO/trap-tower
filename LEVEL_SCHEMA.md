@@ -30,6 +30,14 @@ changes (new OPTIONAL fields, new harness-only rules) do NOT require a
 version bump; breaking changes (field renames/removals, required-field
 additions, meaning changes) do.
 
+v1.0.9 Lane A amendments (2026-11-22, Lead-authorised by
+`verification/redesign-v109/IMPLEMENTATION-GATE.md`, exactly three
+items, NO version bump: the file format is unchanged and the shipped
+`levels.json` stays `schema_version` 3): (1) rule 7 admits a
+qualifying floating main-floor slab; (2) the HUD top-centre number
+chip is replaced by 5 progress pips; (3) rule 11 saw-family list is a
+DRAFT pending Lane M's `MAPPING-V109.md` (see rule 11).
+
 ## Files
 
 - `godot/data/tuning.json` — physics + palette + HUD constants. Physics
@@ -92,7 +100,7 @@ file MUST be rejected with the exact error `schema_version must be 3`.
 | `id` | string | yes | Stable ID, e.g. `"L001"`. IDs are assembly-versioned: within one shipped file they are never reused or reordered. Assembly order is frozen archetype-major (see Structure). |
 | `palette` | int | yes | Index into `tuning.json` palettes. One palette per archetype group (palette = archetype index, 0-based). Palette alone NEVER makes a level distinct. |
 | `spawn` | `{x, y}` | yes | Player feet centre. Must be on/above solid ground with a safe zone: no hazard rect within 40px. Feet y >= 134 (kept conservatively: HUD 90 + hero 39 = 129 minimum; 134 keeps a 5px margin). |
-| `door` | `{x, y}` | yes | Door centre/base. Must stand on solid ground with a safe zone: no hazard rect within 40px. Base y >= 174 (kept conservatively: HUD 90 + door 54 = 144 minimum; 174 keeps the door clear of the HUD chip row). |
+| `door` | `{x, y}` | yes | Door centre/base. Must stand on solid ground with a safe zone: no hazard rect within 40px. Base y >= 174 (kept conservatively: HUD 90 + door 54 = 144 minimum; 174 keeps the door clear of the HUD pip row). |
 | `platforms` | array | yes | Solid / special platforms (below). At least the spawn and door ground. |
 | `hazards` | array | yes | May be empty only for the first 3 levels in file order (validator rule). The generator emits NO empty-hazard levels: every level is lethal from level 1. |
 | `decorations` | array | no | Background silhouettes (see Decorations). Draw-only. Missing = []. The SHIPPED file SHOULD contain zero decorations (see rule 10); any exception needs Lead approval. |
@@ -281,6 +289,16 @@ only (checker fail + report); the runtime does not check them.
      behind a hazard reads as floating geometry.) Saws (disc geometry)
      and `hanging_pillar` (beam mounts) are exempt. Harness only.
    - `hanging_pillar`: exempt (see Hazard types).
+   - FLOATING-SLAB EXCEPTION (v1.0.9 Lane A): the official game's
+     floors ARE floating slabs, so the least fixpoint above admits
+     one exception: a solid rect is grounded iff it is the level's
+     DESIGNATED MAIN FLOOR and w >= 800 and h >= 100 and its top
+     lies in y 200..500. "Designated main floor" = the widest solid
+     rect in the level (tie -> the slab whose top is lowest on
+     screen, i.e. largest y). The checker, the runtime validator,
+     and the autopilot implement this designation identically; a
+     slab failing any bound is NOT admitted and fails exactly as
+     before. All other grounding rules are unchanged.
 8. HUD KEEP-OUT — no DRAWN extent in y < 90: no platform rect, hazard
    rect, saw disc (centre ± r over the full sweep), or pillar home rect
    may have any drawn pixel with y < 90. Spawn feet y >= 134. Door base
@@ -311,10 +329,18 @@ only (checker fail + report); the runtime does not check them.
     any decoration-bearing shipped level needs explicit Lead approval
     with eyes-on evidence recorded.
 11. HAZARD-FAMILY PURITY (harness only): saw hazards appear ONLY in
-    saw-family archetypes (D03, D08, D09, D10, D33, D37, D41) and
+    saw-family archetypes (D09, D10, D11, D33, D37, D41) and
     mix/final archetypes (D26, D42, D43, D44). Spike-family archetypes
     carry spikes, pits, and pillars only — no saws. The generator
     publishes the archetype→family table; the checker enforces it.
+    **DRAFT (v1.0.9 Lane A, NOT YET ENFORCED):** this list is the
+    Ch.1 mapping draft from `REDESIGN-PLAN-V109.md` (D03/D08 leave
+    the saw family, D11 joins). The checker still enforces the
+    previous list (D03, D08, D09, D10, D33, D37, D41 + D26, D42,
+    D43, D44) until Lane M publishes the final list in
+    `MAPPING-V109.md`; the merge lane then flips the checker
+    (`SAW_FAMILY`) and this paragraph together, and re-runs the
+    checker 215/215.
 
 ## Hero
 
@@ -331,9 +357,15 @@ only (checker fail + report); the runtime does not check them.
 
 ## HUD / controls (frozen meanings)
 
-- Top-centre: the level indicator — a SMALL pixel-font level NUMBER
-  (e.g. `37`), yellow on a small dark-red chip. The number is the ONLY
-  top-centre element. No squares, no other counters.
+- Top-centre: the door-progress indicator — FIVE small SQUARES
+  (pips), 23x23px, y 12..35, pitch 30px, centred on the screen
+  (5-pip span x 569..712). Filled = completed stages in the current
+  door (official: 2 filled + 3 outlined at progress 2/5); a door
+  with fewer stages shows that many pips, still centred (D03: 4,
+  D44: 1). Filled pip = yellow fill + dark-red border; unfilled pip
+  = dark-red border only (transparent interior). The pips are the
+  ONLY top-centre element. The old pixel-font level-number chip is
+  REMOVED (v1.0.9 Lane A).
 - Top-left: pause button + restart button — SMALL dark-red square
   buttons with yellow glyphs (pause = two bars; restart = square +
   circular arrow; original drawings). Top-right: Skip button
@@ -391,7 +423,7 @@ only (checker fail + report); the runtime does not check them.
 - Transitions: an ORIGINAL wipe (two panels / iris in the accent
   colour — NOT the reference's mouth shape) between map↔level and on
   level complete. Duration ~0.25s. Probes handle the delay explicitly.
-- Pixel font: ALL in-game text (title, TAP TO RETRY, level number,
+- Pixel font: ALL in-game text (title, TAP TO RETRY, door numbers,
   SKIP, settings labels, map labels) in a chunky code-drawn bitmap
   pixel font with ORIGINAL glyphs (no binary assets). Charset: A-Z,
   0-9, space, `>`, `:`, `-`, `!`, `.`, `'`, `/`, plus any glyph the

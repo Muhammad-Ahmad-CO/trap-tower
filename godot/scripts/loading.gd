@@ -5,13 +5,16 @@ extends Control
 # loading bar below it and a small LOADING + percentage label.
 # Shows ONLY on cold start (main_scene); level returns go directly to
 # map.tscn, so this screen never appears on level return.
-# The bar fills over LOAD_DURATION, then the map opens. Tap / click /
-# any key skips. Safety timer forces the map at 8 s so the player can
+# Lane U5 (M6 title): the bar fills over LOAD_DURATION, then the
+# TITLE screen opens (title.tscn), and the title's 1 PLAYER entry
+# opens the map. Cold start is preloader -> title -> map.
+# The bar fills over LOAD_DURATION, then the title opens. Tap / click /
+# any key skips. Safety timer forces the title at 8 s so the player can
 # never be stuck. Fallback (logo asset missing/unloadable): code-drawn
 # TRAP TOWER text title + the same bar, never a black flash or a crash.
 
 const LOGO_PATH := "res://assets/logo.png"
-const MAP_SCENE := "res://scenes/map.tscn"
+const TITLE_SCENE := "res://scenes/title.tscn"
 const BG_COLOR := Color(26.0 / 255.0, 29.0 / 255.0, 34.0 / 255.0)
 const TRACK_COLOR := Color(58.0 / 255.0, 63.0 / 255.0, 70.0 / 255.0)
 const BAR_COLOR := Color(201.0 / 255.0, 162.0 / 255.0, 39.0 / 255.0)
@@ -87,28 +90,28 @@ func _process(delta: float) -> void:
 	_bar_fill.size = Vector2(BAR_WIDTH * frac, BAR_HEIGHT)
 	_label.text = "LOADING %d%%" % int(frac * 100.0)
 	if frac >= 1.0:
-		_go_to_map()
+		_go_to_title()
 	elif _elapsed >= SAFETY_TIMEOUT:
 		# Should never trigger (fill ends at 2.2 s); backstop only.
-		_go_to_map()
+		_go_to_title()
 
 
 func _input(event: InputEvent) -> void:
 	if _transitioned:
 		return
 	if event is InputEventScreenTouch and event.pressed:
-		_go_to_map()
+		_go_to_title()
 	elif event is InputEventMouseButton and event.pressed:
-		_go_to_map()
+		_go_to_title()
 	elif event is InputEventKey and event.pressed and not event.echo:
-		_go_to_map()
+		_go_to_title()
 
 
-func _go_to_map() -> void:
+func _go_to_title() -> void:
 	if _transitioned:
 		return
 	_transitioned = true
-	get_tree().change_scene_to_file(MAP_SCENE)
+	get_tree().change_scene_to_file(TITLE_SCENE)
 
 
 func _build_text_title() -> void:

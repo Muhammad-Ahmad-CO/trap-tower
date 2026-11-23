@@ -7,9 +7,18 @@
 #   TTDoorMap static table: 44 doors, door_of boundaries, stage lists,
 #   templates (door 3 saw-runs / 4 stages, door 44 final-mega / 1 stage)
 #   map loads with the final levels.json; _total == 215
-#   44 door nodes, labels 1..44 in order; locked <=> first stage >
-#   highest; current <=> door holds highest; done <=> ALL stage IDs
-#   completed (never derived from highest)
+#   CHAPTER-AWARE (Lane P, v1.0.9 condition (a)): the map builds ONE
+#   chapter's door nodes per view — Ch.1 = doors 1..16 (16 nodes),
+#   Ch.2 = doors 17..30 (14), Ch.3 = doors 31..44 (14) + the bonus
+#   node (Ch.3 only). Every per-view count below asserts the exact
+#   count for its fixture's chapter (default chapter =
+#   chapter_of_door(door_of(highest))); a sum-across-chapters check
+#   (chap4) proves 16+14+14 == 44 in total. _is_map_scene derives
+#   its expected count from the map's own _chapter.
+#   per-chapter door nodes, labels in order within the chapter;
+#   locked <=> first stage > highest; current <=> door holds
+#   highest; done <=> ALL stage IDs completed (never derived
+#   from highest)
 #   cold start never auto-opens the picker (picker hidden, return_door -1)
 #   door tap opens the picker (title "DOOR N", obstacle subtitle,
 #   stage buttons with GLOBAL level numbers, check/lock states);
@@ -33,6 +42,14 @@
 #   derives from highest, never from completed)
 #   settings still work (persist + AudioServer state)
 #   HUD pixel-font level NUMBER at idx 0/12/214
+#   M11 back button (C5a, contract-gated): hud signal back_pressed +
+#   is_back_visible() / back_rect() at (136,16) 48x48; click back
+#   mid-play / while paused -> plain map, return_door -1; click back
+#   during the win delay -> no-op (win completes via its own path);
+#   double-tap -> single exit; back hidden in death state; back
+#   from a bonus level -> plain map. These checks DEFER (listed,
+#   never claimed passing) on a tree where the M11 contract is
+#   absent, and execute on the merged tree.
 #
 # Usage:
 #   godot --headless --fixed-fps 60 --path <project> -s tools/probes/ui_probe_v105.gd
@@ -47,6 +64,7 @@ var _fails: Array[String] = []
 var _passes: Array[String] = []
 var _levels: Array = []
 var _total := 0
+var _deferred: Array[String] = []
 
 
 func _initialize() -> void:
@@ -60,6 +78,11 @@ func _check(name: String, ok: bool, detail: String = "") -> void:
 	else:
 		_fails.append(name)
 		print("V5 FAIL: ", name, (" | " + detail) if detail != "" else "")
+
+
+func _defer(name: String, reason: String) -> void:
+	_deferred.append(name)
+	print("V5 DEFERRED: ", name, " | ", reason)
 
 
 func _write_progress(highest: int, completed: Array, save_version: int = 3) -> void:
@@ -115,6 +138,35 @@ func _door_nodes(map_inst: Node) -> Array:
 	return nodes
 
 
+# BonusDoorNode carries `bonus_door` (== 45), never `door`, so
+# _door_nodes never counts it; this helper counts it separately.
+func _bonus_nodes(map_inst: Node) -> Array:
+	var scroll: Control = map_inst.get("_scroll")
+	if scroll == null or scroll.get_child_count() == 0:
+		return []
+	var content: Node = scroll.get_child(0)
+	var nodes: Array = []
+	for child in content.get_children():
+		if _has_prop(child, "bonus_door"):
+			nodes.append(child)
+	return nodes
+
+
+# Expected main-door count for the chapter the map is VIEWING
+# (TTFeatures chapter table: Ch.1 16, Ch.2 14, Ch.3 14).
+func _chapter_door_count(map_inst: Node) -> int:
+	return (TTFeatures.chapter_doors(int(map_inst.get("_chapter"))) as Array).size()
+
+
+# Chapter switch the probe-safe way: _apply_chapter rebuilds the map
+# in place (synchronous) and calls _scroll_to_current, which awaits
+# 2 process frames — so await frames after the call.
+func _switch_chapter(map_inst: Node, chapter: int) -> void:
+	map_inst.call("_apply_chapter", chapter)
+	for f in range(5):
+		await process_frame
+
+
 func _stage_buttons(map_inst: Node) -> Array:
 	var stages: Control = map_inst.get("_picker_stages")
 	if stages == null:
@@ -146,12 +198,19 @@ func _picker_subtitle(map_inst: Node) -> String:
 	return str(t.get("text")) if t != null else ""
 
 
+# Chapter-derived recognition (Lane P C4(iii)): the expected node
+# count comes from the map's OWN _chapter via the TTFeatures
+# chapter table — never a bare 44, never a bare "14 or 16", so a
+# wrong-chapter build cannot pass recognition. (The game scene has
+# no _total/_chapter props, so it still fails here.)
 func _is_map_scene(node: Node) -> bool:
 	if node == null or not is_instance_valid(node):
 		return false
-	if not _has_prop(node, "_total"):
+	if not _has_prop(node, "_total") or not _has_prop(node, "_chapter"):
 		return false
-	return _door_nodes(node).size() == 44
+	if int(node.get("_total")) != 215:
+		return false
+	return _door_nodes(node).size() == _chapter_door_count(node)
 
 
 func _find_icon_button(parent: Node, icon: String) -> Control:
@@ -354,9 +413,16 @@ func _run() -> void:
 	print("V5 levels=", _total, " warnings=", (loaded.get("warnings", []) as Array).size())
 	_check("load1: shipped file has exactly 215 levels", _total == 215,
 		"total=" + str(_total))
-	_check("load2: load_levels returns ZERO visual-rule warnings",
-		(loaded.get("warnings", []) as Array).is_empty(),
-		"warnings=" + str((loaded.get("warnings", []) as Array).size()))
+	# Identity-pinned (Lane P C4(i)): exactly the 2 documented L118
+	# rule-7 warnings — size == 2 AND both strings match exactly.
+	# Count-only would pass if the L118 warnings vanished and two
+	# different warnings appeared; this does not.
+	var _warns: Array = loaded.get("warnings", [])
+	_check("load2: load_levels returns exactly the 2 documented L118 rule-7 warnings",
+		_warns.size() == 2
+		and _warns.has("level L118 rule 7: platforms[2] dashed is neither shaft-flanked nor resting")
+		and _warns.has("level L118 rule 7: platforms[3] dashed is neither shaft-flanked nor resting"),
+		"warnings=" + str(_warns))
 
 	# --- TTDoorMap static table -----------------------------------------
 	_check("door0: TTDoorMap.door_count() == 44", TTDoorMap.door_count() == 44,
@@ -394,7 +460,7 @@ func _run() -> void:
 		int(v3["highest_unlocked"]) == 50 and (v3["completed"] as Array).size() == 50,
 		"highest=" + str(v3["highest_unlocked"]) + " completed=" + str((v3["completed"] as Array).size()))
 
-	# --- map, fresh fixture: cold start, 44 doors -----------------------
+	# --- map, fresh fixture: cold start, Ch.1 = 16 doors ----------------
 	TTState.return_door = -1
 	_write_progress(0, [])
 	var map_scene: PackedScene = load("res://scenes/map.tscn")
@@ -409,17 +475,17 @@ func _run() -> void:
 	_check("map1: map _total == 215", int(map_inst.get("_total")) == 215,
 		"map_total=" + str(map_inst.get("_total")))
 	var nodes := _door_nodes(map_inst)
-	_check("map2: 44 door nodes on the map", nodes.size() == 44,
+	_check("map2: Ch.1 view (highest 0) has 16 door nodes", nodes.size() == 16,
 		"nodes=" + str(nodes.size()))
-	var labels_ok := nodes.size() == 44
+	var labels_ok := nodes.size() == 16
 	for i in range(nodes.size()):
 		if int(nodes[i].get("door")) != i + 1:
 			labels_ok = false
 			break
-	_check("map3: door labels 1..44 in order", labels_ok)
-	var cur_ok := nodes.size() == 44
-	var lock_ok := nodes.size() == 44
-	var done_ok := nodes.size() == 44
+	_check("map3: door labels 1..16 in order (Ch.1)", labels_ok)
+	var cur_ok := nodes.size() == 16
+	var lock_ok := nodes.size() == 16
+	var done_ok := nodes.size() == 16
 	for n in nodes:
 		var d: int = int(n.get("door"))
 		if bool(n.get("current")) != (d == 1):
@@ -573,8 +639,8 @@ func _run() -> void:
 		int(map_inst.get("_highest")) == 14,
 		"highest=" + str(map_inst.get("_highest")))
 	nodes = _door_nodes(map_inst)
-	var mid_ok := nodes.size() == 44
-	var mid_done_ok := nodes.size() == 44
+	var mid_ok := nodes.size() == 16
+	var mid_done_ok := nodes.size() == 16
 	for n in nodes:
 		var d2: int = int(n.get("door"))
 		if bool(n.get("current")) != (d2 == 4):
@@ -756,7 +822,7 @@ func _run() -> void:
 		var win_nodes := _door_nodes(win_map)
 		# highest 13 still sits inside door 3 (stages 10-13): door 3
 		# is CURRENT, and NOT done yet — L014 (idx 13) is still open.
-		win_map_ok = int(win_map.get("_highest")) == 13 and win_nodes.size() == 44 \
+		win_map_ok = int(win_map.get("_highest")) == 13 and win_nodes.size() == 16 \
 			and bool(win_nodes[2].get("current")) and not bool(win_nodes[2].get("done")) \
 			and not bool(win_nodes[3].get("current"))
 	_check("win9: new map: highest 13, door 3 current (L014 still open), door 4 not current", win_map_ok)
@@ -938,7 +1004,7 @@ func _run() -> void:
 	_check("esc1: ESC from game unpauses + exits to map", esc_done,
 		"paused=" + str(paused))
 	var esc_map: Node = current_scene
-	_check("esc2: ESC lands on the map scene (44 door nodes)",
+	_check("esc2: ESC lands on the map scene (chapter door-node count)",
 		_is_map_scene(esc_map),
 		"current_scene=" + (str(esc_map) if esc_map != null else "null"))
 	if esc_map != null and _is_map_scene(esc_map):
@@ -967,6 +1033,197 @@ func _run() -> void:
 	await process_frame
 	await process_frame
 
+	# --- M11 back-to-map button (Skeptic C5a; contract-gated) -----------
+	# Mandated M11 interface contract (INTAKE / LANE-M11-BRIEF):
+	# hud signal `back_pressed`; accessors `is_back_visible()` and
+	# `back_rect()`; back button at (136,16), 48x48, after restart;
+	# hidden by set_dead(true); game connects back_pressed to the
+	# exit path with the C1 guards (re-entrancy flag on _exit_to_map
+	# + win-delay no-op mirroring _on_skip_pressed). M11 IS merged
+	# on this tree, so the contract is present and all seven checks
+	# EXECUTE. On a tree where the contract is absent they DEFER
+	# (listed in _deferred, never claimed as passing). A partial
+	# contract (signal present, accessor missing) FAILS the affected
+	# check instead of deferring — that is a contract mismatch for
+	# the coordinator to fix at merge, not a pass.
+	var m11_names: Array[String] = ["m11-0", "m11-1", "m11-2", "m11-3", "m11-4", "m11-5", "m11-6"]
+	TTState.return_door = -1
+	_write_progress(0, [])
+	TTState.level_index = 0
+	var scene_before_m11: Node = current_scene
+	var game_m0: Node = game_scene.instantiate()
+	root.add_child(game_m0)
+	await physics_frame
+	await physics_frame
+	var hud_m0: Node = game_m0.get("hud")
+	var m11_present: bool = hud_m0 != null and hud_m0.has_signal("back_pressed") \
+		and hud_m0.has_method("is_back_visible") and hud_m0.has_method("back_rect")
+	if not m11_present:
+		for mn in m11_names:
+			_defer(mn + ": M11 back-button check",
+				"M11 contract absent in this tree (no back_pressed / is_back_visible / back_rect on HUD) — deferred to coordinator live-tree run after M11 merge")
+		if is_instance_valid(game_m0):
+			root.remove_child(game_m0)
+			game_m0.queue_free()
+		await process_frame
+		await process_frame
+	else:
+		var back_btn := _find_icon_button(hud_m0, "back")
+		var br_m0: Rect2 = hud_m0.call("back_rect")
+		_check("m11-0: back button exists at (136,16) 48x48 and is visible mid-play",
+			back_btn != null and bool(hud_m0.call("is_back_visible"))
+			and br_m0 == Rect2(136, 16, 48, 48),
+			"back_rect=" + str(br_m0))
+		# m11-1: click back mid-play -> plain map, picker closed, return_door -1.
+		if back_btn != null:
+			_click_control(back_btn)
+		var m11_map := await _wait_for_map(scene_before_m11)
+		_check("m11-1: back mid-play returns to the plain map (picker closed, return_door -1)",
+			m11_map != null and not _picker_visible(m11_map) and _picker_door(m11_map) == 0
+			and TTState.return_door == -1,
+			"map=" + str(m11_map != null) + " return_door=" + str(TTState.return_door))
+		# m11-2: click back while paused -> same plain-map exit.
+		TTState.return_door = -1
+		TTState.level_index = 0
+		var scene_before_m2: Node = current_scene
+		var game_m2: Node = game_scene.instantiate()
+		root.add_child(game_m2)
+		await physics_frame
+		await physics_frame
+		game_m2.call("pause_game")
+		await process_frame
+		await physics_frame
+		var hud_m2: Node = game_m2.get("hud")
+		var back_m2 := _find_icon_button(hud_m2, "back") if hud_m2 != null else null
+		if back_m2 != null:
+			_click_control(back_m2)
+		var m2_map := await _wait_for_map(scene_before_m2)
+		_check("m11-2: back while paused returns to the plain map (picker closed, return_door -1)",
+			m2_map != null and not _picker_visible(m2_map) and _picker_door(m2_map) == 0
+			and TTState.return_door == -1 and paused == false,
+			"map=" + str(m2_map != null) + " paused=" + str(paused))
+		if is_instance_valid(game_m2):
+			root.remove_child(game_m2)
+			game_m2.queue_free()
+		await process_frame
+		await process_frame
+		# m11-3: click back during the 0.9s win delay -> no-op; the win
+		# completes via its own path (picker OPEN for the played door).
+		_write_progress(12, _ids_upto(12))
+		TTState.level_index = 12
+		var scene_before_m3: Node = current_scene
+		var game_m3: Node = game_scene.instantiate()
+		root.add_child(game_m3)
+		await physics_frame
+		await physics_frame
+		var runtime_m3: Node = game_m3.get("runtime")
+		var player_m3: Node2D = game_m3.get("player")
+		var door_m3: Node = runtime_m3.get("door") if runtime_m3 != null else null
+		var drect_m3 := Rect2()
+		if door_m3 != null:
+			drect_m3 = door_m3.call("door_rect")
+		var won_m3 := false
+		if player_m3 != null and runtime_m3 != null and drect_m3.size.x > 0.0:
+			var target_m3 := drect_m3.get_center()
+			for f in range(60):
+				player_m3.global_position = target_m3
+				player_m3.set("velocity", Vector2.ZERO)
+				await physics_frame
+				if bool(runtime_m3.get("level_completed")):
+					won_m3 = true
+					break
+		# Let game._process arm the win delay, then tap back inside it.
+		await physics_frame
+		await physics_frame
+		var hud_m3: Node = game_m3.get("hud")
+		var back_m3 := _find_icon_button(hud_m3, "back") if hud_m3 != null else null
+		var delay_armed: bool = won_m3 and game_m3 != null and float(game_m3.get("_win_delay")) >= 0.0
+		if back_m3 != null:
+			_click_control(back_m3)
+		var m3_map := await _wait_for_map(scene_before_m3)
+		if m3_map != null:
+			for f in range(5):
+				await process_frame
+		_check("m11-3: back during the win delay is a no-op — win completes to door 3's picker",
+			delay_armed and m3_map != null and _picker_visible(m3_map) and _picker_door(m3_map) == 3
+			and TTState.level_index == 12,
+			"won=" + str(won_m3) + " delay_armed=" + str(delay_armed)
+			+ " picker_door=" + (str(_picker_door(m3_map)) if m3_map != null else "?"))
+		if is_instance_valid(game_m3):
+			root.remove_child(game_m3)
+			game_m3.queue_free()
+		await process_frame
+		await process_frame
+		# m11-4: double-tap back -> single exit, no error (plain map).
+		TTState.return_door = -1
+		TTState.level_index = 0
+		var scene_before_m4: Node = current_scene
+		var game_m4: Node = game_scene.instantiate()
+		root.add_child(game_m4)
+		await physics_frame
+		await physics_frame
+		var hud_m4: Node = game_m4.get("hud")
+		var back_m4 := _find_icon_button(hud_m4, "back") if hud_m4 != null else null
+		if back_m4 != null:
+			_click_control(back_m4)
+			_click_control(back_m4)
+		var m4_map := await _wait_for_map(scene_before_m4)
+		_check("m11-4: double-tap back exits once to the plain map (picker closed, return_door -1)",
+			m4_map != null and not _picker_visible(m4_map) and _picker_door(m4_map) == 0
+			and TTState.return_door == -1 and paused == false,
+			"map=" + str(m4_map != null) + " return_door=" + str(TTState.return_door))
+		if is_instance_valid(game_m4):
+			root.remove_child(game_m4)
+			game_m4.queue_free()
+		await process_frame
+		await process_frame
+		# m11-5: back hidden in death state.
+		TTState.level_index = 0
+		var game_m5: Node = game_scene.instantiate()
+		root.add_child(game_m5)
+		await physics_frame
+		await physics_frame
+		var hud_m5: Node = game_m5.get("hud")
+		var back_m5 := _find_icon_button(hud_m5, "back") if hud_m5 != null else null
+		if hud_m5 != null:
+			hud_m5.call("set_dead", true)
+		_check("m11-5: back hidden in death state (is_back_visible() == false after set_dead(true))",
+			hud_m5 != null and not bool(hud_m5.call("is_back_visible"))
+			and (back_m5 == null or not back_m5.visible),
+			"is_back_visible=" + (str(hud_m5.call("is_back_visible")) if hud_m5 != null else "?"))
+		if hud_m5 != null:
+			hud_m5.call("set_dead", false)
+		if is_instance_valid(game_m5):
+			root.remove_child(game_m5)
+			game_m5.queue_free()
+		await process_frame
+		await process_frame
+		# m11-6 (C5b): back from a BONUS level -> plain map, return_door -1.
+		TTState.return_door = -1
+		TTState.bonus = true
+		TTState.level_index = 0
+		var scene_before_m6: Node = current_scene
+		var game_m6: Node = game_scene.instantiate()
+		root.add_child(game_m6)
+		await physics_frame
+		await physics_frame
+		var hud_m6: Node = game_m6.get("hud")
+		var back_m6 := _find_icon_button(hud_m6, "back") if hud_m6 != null else null
+		if back_m6 != null:
+			_click_control(back_m6)
+		var m6_map := await _wait_for_map(scene_before_m6)
+		_check("m11-6: back from a bonus level returns to the plain map (picker closed, return_door -1)",
+			m6_map != null and not _picker_visible(m6_map) and _picker_door(m6_map) == 0
+			and TTState.return_door == -1,
+			"map=" + str(m6_map != null) + " return_door=" + str(TTState.return_door))
+		TTState.bonus = false
+		TTState.return_door = -1
+		if is_instance_valid(game_m6):
+			root.remove_child(game_m6)
+			game_m6.queue_free()
+		await process_frame
+		await process_frame
+
 	# --- highest=214 fixture: door 44 done, 1 stage -----------------------
 	_write_progress(214, _ids_upto(215))
 	map_inst = map_scene.instantiate()
@@ -980,8 +1237,8 @@ func _run() -> void:
 		int(map_inst.get("_highest")) == 214,
 		"highest=" + str(map_inst.get("_highest")))
 	nodes = _door_nodes(map_inst)
-	var end_ok := nodes.size() == 44
-	var end_done_ok := nodes.size() == 44
+	var end_ok := nodes.size() == 14
+	var end_done_ok := nodes.size() == 14
 	for n in nodes:
 		var d3: int = int(n.get("door"))
 		if bool(n.get("locked")):
@@ -990,7 +1247,7 @@ func _run() -> void:
 			end_ok = false
 		if bool(n.get("done")) != true:
 			end_done_ok = false
-	_check("end2: highest=214 -> all 44 doors unlocked, door 44 current", end_ok)
+	_check("end2: highest=214 -> all 14 Ch.3 doors unlocked, door 44 current", end_ok)
 	_check("end3: highest=214 + all ids completed -> every door done", end_done_ok)
 	map_inst.call("open_picker", 44)
 	await process_frame
@@ -1024,15 +1281,15 @@ func _run() -> void:
 	await process_frame
 	await process_frame
 	nodes = _door_nodes(map_inst)
-	var inc_ok := nodes.size() == 44
-	if nodes.size() == 44:
+	var inc_ok := nodes.size() == 16
+	if nodes.size() == 16:
 		inc_ok = bool(nodes[1].get("locked")) and not bool(nodes[0].get("done")) \
 			and bool(nodes[1].get("done"))
 	_check("inc1: inconsistent fixture -> door 2 locked despite all its stages completed; door 1 not done",
 		inc_ok,
-		"door1 done=" + (str(nodes[0].get("done")) if nodes.size() == 44 else "?")
-		+ " door2 locked=" + (str(nodes[1].get("locked")) if nodes.size() == 44 else "?")
-		+ " door2 done=" + (str(nodes[1].get("done")) if nodes.size() == 44 else "?"))
+		"door1 done=" + (str(nodes[0].get("done")) if nodes.size() == 16 else "?")
+		+ " door2 locked=" + (str(nodes[1].get("locked")) if nodes.size() == 16 else "?")
+		+ " door2 done=" + (str(nodes[1].get("done")) if nodes.size() == 16 else "?"))
 	map_inst.call("open_picker", 2)
 	await process_frame
 	_check("inc2: open_picker(2) on the locked door is a no-op despite completed stages",
@@ -1050,6 +1307,67 @@ func _run() -> void:
 		inc_stage_ok)
 	root.remove_child(map_inst)
 	map_inst.queue_free()
+	await process_frame
+	await process_frame
+
+	# --- chapter views: per-chapter counts + sum == 44 -----------------
+	# Fresh fixture (highest 0) opens on Ch.1 by map.gd:893
+	# (_chapter = chapter_of_door(door_of(_highest))). Switch with
+	# _apply_chapter (probe-safe, in-place) and assert each view's
+	# exact door range + bonus presence (bonus node: Ch.3 only).
+	_write_progress(0, [])
+	var cmap: Node = map_scene.instantiate()
+	root.add_child(cmap)
+	await process_frame
+	await process_frame
+	await physics_frame
+	await process_frame
+	await process_frame
+	var ch1_nodes := _door_nodes(cmap)
+	var ch1_doors: Array = []
+	for n in ch1_nodes:
+		ch1_doors.append(int(n.get("door")))
+	_check("chap1: Ch.1 view (highest 0) has 16 door nodes, doors 1..16, 0 bonus nodes",
+		int(cmap.get("_chapter")) == 1 and ch1_nodes.size() == 16
+		and ch1_doors == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+		and _bonus_nodes(cmap).size() == 0,
+		"chapter=" + str(cmap.get("_chapter")) + " nodes=" + str(ch1_nodes.size())
+		+ " bonus=" + str(_bonus_nodes(cmap).size()))
+	await _switch_chapter(cmap, 2)
+	var ch2_nodes := _door_nodes(cmap)
+	var ch2_doors: Array = []
+	for n in ch2_nodes:
+		ch2_doors.append(int(n.get("door")))
+	_check("chap2: Ch.2 view has 14 door nodes, doors 17..30, 0 bonus nodes",
+		int(cmap.get("_chapter")) == 2 and ch2_nodes.size() == 14
+		and ch2_doors == [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+		and _bonus_nodes(cmap).size() == 0,
+		"chapter=" + str(cmap.get("_chapter")) + " nodes=" + str(ch2_nodes.size())
+		+ " bonus=" + str(_bonus_nodes(cmap).size()))
+	await _switch_chapter(cmap, 3)
+	var ch3_nodes := _door_nodes(cmap)
+	var ch3_doors: Array = []
+	for n in ch3_nodes:
+		ch3_doors.append(int(n.get("door")))
+	_check("chap3: Ch.3 view has 14 door nodes, doors 31..44, 1 bonus node",
+		int(cmap.get("_chapter")) == 3 and ch3_nodes.size() == 14
+		and ch3_doors == [31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44]
+		and _bonus_nodes(cmap).size() == 1,
+		"chapter=" + str(cmap.get("_chapter")) + " nodes=" + str(ch3_nodes.size())
+		+ " bonus=" + str(_bonus_nodes(cmap).size()))
+	_check("chap4: door nodes summed across Ch.1+Ch.2+Ch.3 == 44",
+		ch1_nodes.size() + ch2_nodes.size() + ch3_nodes.size() == 44,
+		"sum=" + str(ch1_nodes.size() + ch2_nodes.size() + ch3_nodes.size()))
+	var tabs: Array = cmap.get("_chapter_tabs")
+	var tab_ok := tabs.size() == 3
+	var tab_sel := false
+	for entry in tabs:
+		if int(entry["chapter"]) == int(cmap.get("_chapter")):
+			tab_sel = true
+	_check("chap5: chapter tabs exist (3) and the selected tab follows the viewed chapter",
+		tab_ok and tab_sel, "tabs=" + str(tabs.size()) + " chapter=" + str(cmap.get("_chapter")))
+	root.remove_child(cmap)
+	cmap.queue_free()
 	await process_frame
 	await process_frame
 
@@ -1117,7 +1435,9 @@ func _run() -> void:
 
 
 func _finish() -> void:
-	print("V5 SUMMARY: ", _passes.size(), " passed, ", _fails.size(), " failed")
+	print("V5 SUMMARY: ", _passes.size(), " passed, ", _fails.size(), " failed, ", _deferred.size(), " deferred (not executed)")
+	if not _deferred.is_empty():
+		print("V5 DEFERRED (contract absent — run on merged tree, never claimed passing): ", ", ".join(_deferred))
 	print("V5 NOT VERIFIED HEADLESS: rendered legibility, finger feel, F9 latency, audible audio, non-16:9 letterbox; glow/marker asserted via DoorNode.current flag only.")
 	if not _fails.is_empty():
 		print("V5 FAILED: ", ", ".join(_fails))

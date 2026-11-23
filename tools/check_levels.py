@@ -30,6 +30,11 @@ godot/data/levels.json + godot/data/tuning.json and checks:
       grounded beams. Rect hazards (spikes,
       spiked_column) must not area-overlap solid rects beyond the
       4px seating tolerance (saws and hanging_pillar exempt).
+      EXCEPTION (v1.0.9 Lane A): the designated main floor (widest
+      solid rect; tie -> lowest top on screen) is grounded iff
+      w >= 800 and h >= 100 and top in y 200..500 -- the official
+      game's floating floor slab. All other grounding rules
+      unchanged.
   (h) HUD KEEP-OUT (rule 8): no drawn extent in y < 90; spawn feet
       y >= 134; door base y >= 174.
   (i) DENSITY FLOOR (rule 9): >= 2 solid rects in the middle band
@@ -42,20 +47,18 @@ godot/data/levels.json + godot/data/tuning.json and checks:
       ALSO reports a report-only mass metric (solid area fraction
       + per-column solid coverage) for every level; there is NO
       hard mass threshold.
-  (k) HAZARD-FAMILY PURITY (rule 11): saw hazards appear ONLY in
-      saw-family archetypes (D03, D08, D09, D10, D33, D37, D41)
-      and mix/final archetypes (D26, D42, D43, D44). Spike-family
+  (k) HAZARD-FAMILY PURITY (rule 11, v1.0.9 ENFORCED): saw hazards
+      appear ONLY in saw-family archetypes (D11, D13, D14, D16, D17,
+      D21, D28, D29, D33, D41, D43, D44). Spike-family
       archetypes carry spikes, pits, and pillars only -- no saws.
       Archetype is read from the `variation` field (D{nn}S{V}V{v});
       levels without that provenance pattern are not family-checked.
 
   Archetype -> family table (rule 11; the generator publishes the
   same table -- the checker enforces it):
-    saw-family (saws allowed): D03 saw-runs, D08 swing-saws,
-      D09 patrol-saws, D10 gap-saws, D33 saw-fields,
-      D37 saw-corridors, D41 final-tower-saws.
-    mix/final (saws allowed): D26 grand-mixes, D42 final-skyline,
-      D43 final-reversed, D44 final-mega.
+    saw-family (saws allowed, MAPPING-V109.md §3): D11, D13, D14,
+      D16, D17, D21, D28, D29, D33, D41, D43, D44.
+    mix/final (saws allowed): D44 final-mega (in the list above).
     spike-family (NO saws; spikes/pits/pillars only): D01 pitfall,
       D02 spike-hops, D04 popup-spikes, D05 triggered-spikes,
       D06 triggered-pillars, D07 periodic-pillars,
@@ -71,7 +74,10 @@ godot/data/levels.json + godot/data/tuning.json and checks:
   (j) DECORATIONS (rule 10): the optional `decorations` array, if
       present, must satisfy the attachment chain, HUD keep-out,
       no-hazard/spawn/door-overlap, and bounds rules (error prefix
-      `deco:`). Decorations are ignored by reachability,
+      `deco:`). Each entry may carry an OPTIONAL `shape` ("rect" |
+      "cloud" | "tree" | "hill" | "palm", default "rect"); an unknown
+      shape is a hard error, and the shape's BOUNDING rect is the
+      validated rect. Decorations are ignored by reachability,
       connectivity, and dedupe signatures.
   (l) Round 4, Rule 12 (chained-pair window floor, harness only) +
       column span test: a spiked column is passable only if the
@@ -134,6 +140,11 @@ CORE_MIN_WIDTH = 160.0      # LEVEL_SCHEMA.md rule 9: combined width >= 160
 OVERLAP_TOL = 4.0           # LEVEL_SCHEMA.md rule 7: seating tolerance
 DECO_MIN_W = 48.0           # LEVEL_SCHEMA.md Decorations: w >= 48
 DECO_MIN_H = 16.0           # LEVEL_SCHEMA.md Decorations: h >= 16
+# Lane U2 (M10-full): OPTIONAL `shape` on decoration entries
+# ("rect" | "cloud" | "tree" | "hill" | "palm", default "rect").
+# The shape's BOUNDING rect is the validated rect: rule 10
+# (attachment, keep-out, overlap, minima) applies to it unchanged.
+DECO_SHAPES = ("rect", "cloud", "tree", "hill", "palm")
 DECO_ATTACH_TOL = 4.0       # LEVEL_SCHEMA.md rule 10: edge-adjacent
                             # within 4px counts as attached
 MIN_PLATFORM_H = 16.0       # LEVEL_SCHEMA.md: platform h >= 16
@@ -148,6 +159,11 @@ DEFAULT_DROP_SPEED = 700.0  # LEVEL_SCHEMA.md: drop_speed default 700 px/s
 CONNECTIVITY_CELL = 8.0     # LEVEL_SCHEMA.md rule 5: 8px flood-fill grid
 HERO_RECT_W = 15.0          # LEVEL_SCHEMA.md v3: hero collision ~15x39
 HERO_RECT_H = 39.0          # (defaults; connectivity uses tuning player size)
+COIN_R = 10.0               # Lane U1 (M1): coin collect radius; the
+                            # drawn/collected coin rect is 20x20
+KEY_R = 14.0                # Lane U4 (M2): key collect radius; the
+                            # drawn/collected key rect is 28x28
+                            # (same as the star, key_node.gd KEY_R)
 DOOR_W = 36.0               # LEVEL_SCHEMA.md v3 Door: SCHEMA CONSTANT 36x54
 DOOR_H = 54.0               # (tuning.json `door` entry is DEPRECATED)
 # Frozen v3 harness envelope (LEVEL_SCHEMA.md rule 5): measured probe
@@ -210,12 +226,70 @@ CHAIN_WINDOW_CONST = 69.7   # single-strip window constant (probe)
 FLOOR_SLAB_MIN_WIDTH_FRAC = 0.5  # rule 9: slab spans >= 50% of width
 MASS_GRID_CELL = 8.0        # mass-metric grid (report-only, rule 9)
 
+# Rule 7 (v1.0.9 Lane A): floating main-floor slab exception. The
+# official game's floors ARE floating slabs (flat-run slab top
+# y~285, thickness ~147, void below); the old rule 7 banned them.
+# A solid rect is grounded iff it is the level's DESIGNATED MAIN
+# FLOOR and w >= 800 and h >= 100 and top in y 200..500. All other
+# grounding rules are unchanged. The autopilot implements the
+# identical designation (see autopilot.gd _main_floor_index); the
+# runtime needs no change (it builds whatever the data says).
+SLAB_MIN_W = 800.0
+SLAB_MIN_H = 100.0
+SLAB_TOP_MIN_Y = 200.0
+SLAB_TOP_MAX_Y = 500.0
+
+# Rule 11 (v1.0.9 Lane F, ENFORCED): final saw-family list from
+# MAPPING-V109.md §3 (D03/D08 leave the saw family, D11 joins).
+# SAW_FAMILY_DRAFT_V109 records the old draft for reference only.
+SAW_FAMILY_DRAFT_V109 = frozenset({9, 10, 11, 26, 33, 37, 41, 42, 43, 44})
+
+# Rule (e) exception, v1.0.9 Lane C3 (generalizes Lane B3's
+# pure-dashed exception), EXTENDED by Lane F to D36: a door whose
+# mechanic set contains NO hazard kind (MAPPING-V109.md §4:
+# D06 {dashed}, D15 {dashed, moving}, D20 {moving, tilting},
+# D36 {dashed, falling}) may have zero hazards iff the level holds
+# >= NO_HAZARD_KIND_MIN platforms of its door's mechanic kinds.
+# D16 {dashed, falling, saw_static} is NOT covered: its set holds a
+# hazard kind (saw_static). Every other door with zero hazards still
+# fails. Door identity comes from the level's own `variation`
+# ("D15S1V1"); a variation that does not start with a listed prefix
+# never qualifies (fail closed). Valid only while these doors' sets
+# stay hazard-free (MAPPING-AMENDMENTS.md A3).
+NO_HAZARD_KIND_DOORS = {
+    "D06S": frozenset({"dashed"}),
+    "D15S": frozenset({"dashed", "moving"}),
+    "D20S": frozenset({"moving", "tilting"}),
+    "D36S": frozenset({"dashed", "falling"}),
+}
+NO_HAZARD_KIND_MIN = 3
+
+
+def no_hazard_kind_exception(lv):
+    # True iff lv is a D06/D15/D20/D36 level holding >=
+    # NO_HAZARD_KIND_MIN platforms of its door's mechanic kinds.
+    # Mirrored in godot/scripts/level_data.gd
+    # (_no_hazard_kind_exception) -- the two must never drift.
+    var = lv.get("variation", "")
+    if not isinstance(var, str):
+        return False
+    kinds = None
+    for prefix, ks in NO_HAZARD_KIND_DOORS.items():
+        if var.startswith(prefix):
+            kinds = ks
+            break
+    if kinds is None:
+        return False
+    n = sum(1 for p in lv.get("platforms", [])
+            if isinstance(p, dict) and p.get("kind") in kinds)
+    return n >= NO_HAZARD_KIND_MIN
+
 PLATFORM_KINDS = {"solid", "dashed", "falling", "tilting", "moving"}
 # v3: `dotted_line` REMOVED -- any occurrence is an unknown type.
 HAZARD_TYPES = {"spikes", "saw", "spiked_column", "hanging_pillar"}
 # Rule 11: archetype numbers allowed to carry saws (saw-family +
 # mix/final). All other archetypes are spike-family (no saws).
-SAW_FAMILY = frozenset({3, 8, 9, 10, 26, 33, 37, 41, 42, 43, 44})
+SAW_FAMILY = frozenset({11, 13, 14, 16, 17, 21, 28, 29, 33, 41, 43, 44})
 SPIKE_DIRS = {"up", "down", "left", "right"}
 LEVEL_FIELDS = {"id", "palette", "spawn", "door", "platforms", "hazards",
                 "template", "variation"}
@@ -253,6 +327,39 @@ def seg_point_dist(px, py, x1, y1, x2, y2):
     denom = vx * vx + vy * vy
     t = 0.0 if denom == 0 else max(0.0, min(1.0, (wx * vx + wy * vy) / denom))
     return math.hypot(px - (x1 + t * vx), py - (y1 + t * vy))
+
+
+def main_floor_index(plats, rects):
+    """Designated main floor (rule 7, v1.0.9 Lane A): the widest
+    `solid` rect in the level; tie -> the slab whose top is lowest
+    on screen (largest y). Returns the platform index, or -1 when
+    the level has no solid rect. The autopilot implements this
+    designation identically (autopilot.gd _main_floor_index); the
+    two must never drift."""
+    best = -1
+    for i, p in enumerate(plats):
+        if p.get("kind") != "solid" or rects[i] is None:
+            continue
+        if best < 0:
+            best = i
+            continue
+        w, bw = rects[i][2], rects[best][2]
+        if w > bw or (w == bw and rects[i][1] > rects[best][1]):
+            best = i
+    return best
+
+
+def is_floating_slab(plats, rects):
+    """True iff the level's designated main floor qualifies for the
+    rule-7 floating-slab exception: w >= 800, h >= 100, top in
+    y 200..500. Returns (qualifies, index)."""
+    idx = main_floor_index(plats, rects)
+    if idx < 0:
+        return False, -1
+    r = rects[idx]
+    ok = r[2] >= SLAB_MIN_W and r[3] >= SLAB_MIN_H \
+        and SLAB_TOP_MIN_Y <= r[1] <= SLAB_TOP_MAX_Y
+    return ok, idx
 
 
 def qb(v, size):
@@ -666,7 +773,8 @@ class LevelCheck:
             self.structural_ok = False
         if not self.structural_ok:
             return
-        if not lv["hazards"] and self.index >= 3:
+        if not lv["hazards"] and self.index >= 3 \
+                and not no_hazard_kind_exception(lv):
             self.errors.append(
                 "hazards may be empty only for the first 3 teaching levels")
         for i, p in enumerate(lv["platforms"]):
@@ -936,10 +1044,18 @@ class LevelCheck:
     def _grounded_solids(self, rects):
         """Fixpoint set of grounded solid indices: floor, resting,
         pillar-connected, or both-ends-touching. A support must itself
-        be grounded, so floating stacks never ground each other."""
+        be grounded, so floating stacks never ground each other.
+        Rule 7 (v1.0.9 Lane A): a qualifying floating main-floor slab
+        (widest solid, w >= 800, h >= 100, top in y 200..500) is
+        seeded as grounded before the fixpoint runs, so platforms
+        resting on it ground normally; a slab that fails any bound
+        is NOT seeded and fails exactly as before."""
         plats = self.lv["platforms"]
         floor_y = self.tun.floor_y
         grounded = set()
+        slab_ok, slab_idx = is_floating_slab(plats, rects)
+        if slab_ok:
+            grounded.add(slab_idx)
         changed = True
         while changed:
             changed = False
@@ -964,6 +1080,20 @@ class LevelCheck:
                                 and q[0] + q[2] <= r[0] + r[2]:
                             ok = True
                             break
+                if not ok:
+                    # Hanging (Lane D patch, v1.0.9): a grounded solid
+                    # whose bottom touches this platform's top with
+                    # >= 8px x-overlap (the platform hangs from the
+                    # solid above). Needed for L127's hanging blocks
+                    # and the D32 hanging arch.
+                    for j in grounded:
+                        q = rects[j]
+                        if abs((q[1] + q[3]) - r[1]) <= GROUND_TOL:
+                            ov = min(q[0] + q[2], r[0] + r[2]) \
+                                - max(q[0], r[0])
+                            if ov >= 8.0:
+                                ok = True
+                                break
                 if not ok:
                     left = right = False
                     for j in grounded:
@@ -1416,6 +1546,15 @@ class LevelCheck:
         if not isinstance(decos, list):
             self.errors.append("deco: decorations must be an array")
             return
+        # Lane U2 (M10-full): OPTIONAL `shape` per entry; unknown
+        # shape = hard error. The shape's bounding rect is the
+        # validated rect (all checks below run on it unchanged).
+        for i, d in enumerate(decos):
+            if isinstance(d, dict) and "shape" in d:
+                if d["shape"] not in DECO_SHAPES:
+                    self.errors.append(
+                        "deco: decorations[%d] unknown shape %r"
+                        % (i, d["shape"]))
         tun = self.tun
         W, H = tun.width, tun.floor_y
         rects = self._deco_rects()
@@ -1500,6 +1639,335 @@ class LevelCheck:
                 self.errors.append(
                     "deco: decorations[%d] is not attached to any "
                     "solid platform (no attachment chain)" % i)
+
+    # -- (b6) coins (Lane U1, M1) ----------------------------------------
+    def check_coins(self):
+        """The OPTIONAL `coins` array. Each entry must be {x, y}
+        numbers (unknown shape = hard error); the drawn coin (20x20
+        rect) must satisfy rule 8 keep-out (top y >= 90), must not
+        overlap any hazard rect / swept-saw bbox, the spawn hero rect,
+        or the door rect; and must be reachable: some walk or jump
+        trajectory with the REAL discrete physics (player.gd: 1/60 s,
+        vx in {-243, 0, +243}, vy = -570 on the jump frame, instant
+        start/stop) puts the hero rect over the coin rect with >= 2px
+        overlap on both axes, without touching a hazard first. A
+        knife-edge sliver is NOT a proof. Missing array = [] (valid).
+        Error prefix `coin:`."""
+        if not isinstance(self.lv, dict) or "coins" not in self.lv:
+            return
+        coins = self.lv["coins"]
+        if not isinstance(coins, list):
+            self.errors.append("coin: coins must be an array")
+            return
+        tun = self.tun
+        W, H = tun.width, tun.floor_y
+        rects = []
+        for i, c in enumerate(coins):
+            if not isinstance(c, dict) or not is_num(c.get("x")) \
+                    or not is_num(c.get("y")):
+                self.errors.append(
+                    "coin: coins[%d] must be {x, y} numbers "
+                    "(unknown entry shape)" % i)
+                rects.append(None)
+                continue
+            x, y = float(c["x"]), float(c["y"])
+            r = (x - COIN_R, y - COIN_R, 2 * COIN_R, 2 * COIN_R)
+            rects.append(r)
+            if x < 0 or x > W or y < 0 or y > H:
+                self.errors.append(
+                    "coin: coins[%d] centre (%g,%g) outside bounds "
+                    "0..%g / 0..%g" % (i, x, y, W, H))
+            if r[1] < HUD_KEEPOUT_Y:
+                self.errors.append(
+                    "coin: coins[%d] keep-out: drawn top y=%g < %g"
+                    % (i, r[1], HUD_KEEPOUT_Y))
+        # No overlap with hazards / spawn hero / door (area > 0).
+        blockers = []
+        for h in self.lv.get("hazards", []):
+            blockers.append(self._hazard_block_rect(h)
+                            if isinstance(h, dict) else None)
+        sp = self.lv.get("spawn")
+        hero = None
+        if isinstance(sp, dict) and is_num(sp.get("x")) \
+                and is_num(sp.get("y")):
+            hero = (float(sp["x"]) - HERO_RECT_W / 2.0,
+                    float(sp["y"]) - HERO_RECT_H,
+                    HERO_RECT_W, HERO_RECT_H)
+        try:
+            door = self.door_rect()
+        except Exception:
+            door = None
+        for i, r in enumerate(rects):
+            if r is None:
+                continue
+            for j, b in enumerate(blockers):
+                if b is not None and rects_overlap(r, b):
+                    self.errors.append(
+                        "coin: coins[%d] overlaps hazards[%d] hazard rect"
+                        % (i, j))
+                    break
+            if hero is not None and rects_overlap(r, hero):
+                self.errors.append(
+                    "coin: coins[%d] overlaps the spawn hero rect" % i)
+            if door is not None and rects_overlap(r, door):
+                self.errors.append(
+                    "coin: coins[%d] overlaps the door rect" % i)
+        # Reachability: walk + jump trajectories, real discrete
+        # physics, >= 2px overlap on both axes.
+        tops = [r for r in self._rects() if r is not None]
+        for i, r in enumerate(rects):
+            if r is None:
+                continue
+            if not self._coin_reachable(r, tops, blockers):
+                self.errors.append(
+                    "coin: coins[%d] is not reachable from any "
+                    "platform (no walk/jump trajectory, real physics)"
+                    % i)
+
+    def _coin_rect_overlap_dims(self, a, b):
+        w = min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0])
+        h = min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1])
+        if w > 0 and h > 0:
+            return w, h
+        return 0.0, 0.0
+
+    def _coin_reachable(self, coin_rect, tops, blockers):
+        """Best min(overlap w, overlap h) over all walk/jump
+        trajectories from any platform top; reachable iff >= 2px.
+        Mirrors godot/scripts/player.gd exactly (1/60 s steps,
+        vx instant, vy = -570 on the jump frame, gravity 3110).
+        MAX_FALL is tuning.json player.max_fall_speed (600); it is
+        not exposed on Tuning and never binds on these short falls."""
+        tun = self.tun
+        dt = 1.0 / 60.0
+        pw, ph = tun.player_w, tun.player_h
+        half_h = ph / 2.0
+        max_fall = 600.0
+        best = 0.0
+
+        def hero_rect(cx, cy):
+            return (cx - pw / 2.0, cy - half_h, pw, ph)
+
+        def hits_hazard(hr):
+            return any(b is not None and rects_overlap(hr, b)
+                       for b in blockers)
+
+        # (a) Walking: every platform top, both directions, 1px steps.
+        for (x0, y0, w0, _h0) in tops:
+            for (sx, step) in ((x0 + 8.0, 1.0), (x0 + w0 - 8.0, -1.0)):
+                cx = sx
+                cy = y0 - half_h
+                while x0 - pw / 2.0 <= cx <= x0 + w0 + pw / 2.0:
+                    hr = hero_rect(cx, cy)
+                    if hits_hazard(hr):
+                        break
+                    ow, oh = self._coin_rect_overlap_dims(hr, coin_rect)
+                    if ow > 0 and oh > 0:
+                        best = max(best, min(ow, oh))
+                        if best >= 2.0:
+                            return True
+                    cx += step
+        # (b) Jumps: every takeoff x (4px steps), vx in {+243, 0, -243}.
+        for (x0, y0, w0, _h0) in tops:
+            tx = x0 + 8.0
+            while tx <= x0 + w0 - 8.0:
+                for vx in (tun.run_speed, 0.0, -tun.run_speed):
+                    cx, cy = tx, y0 - half_h
+                    vy = float(tun.jump_v)
+                    for _frame in range(240):
+                        if _frame > 0:
+                            vy = min(vy + tun.gravity * dt, max_fall)
+                        feet_prev = cy + half_h
+                        cx += vx * dt
+                        cy += vy * dt
+                        feet_new = cy + half_h
+                        hr = hero_rect(cx, cy)
+                        if hits_hazard(hr):
+                            break
+                        ow, oh = self._coin_rect_overlap_dims(hr, coin_rect)
+                        if ow > 0 and oh > 0:
+                            best = max(best, min(ow, oh))
+                            if best >= 2.0:
+                                return True
+                        if vy > 0:
+                            landed = False
+                            for (ax, ay, aw, _ah) in tops:
+                                if feet_prev < ay <= feet_new \
+                                        and ax - pw / 2.0 <= cx <= ax + aw + pw / 2.0:
+                                    landed = True
+                                    break
+                            if landed:
+                                break
+                        if feet_new > tun.floor_y or cx < -50 \
+                                or cx > tun.width + 50:
+                            break
+                tx += 4.0
+        return best >= 2.0
+
+    # -- (b7) keys (Lane U4, M2) -----------------------------------------
+    def check_keys(self):
+        """The OPTIONAL `keys` array. Each entry must be {x, y}
+        numbers (unknown shape = hard error); the drawn key (28x28
+        rect) must satisfy rule 8 keep-out (top y >= 90), must not
+        overlap any hazard rect / swept-saw bbox, the spawn hero rect,
+        or the door rect; and must be reachable: some walk or jump
+        trajectory with the REAL discrete physics (player.gd: 1/60 s,
+        vx in {-243, 0, +243}, vy = -570 on the jump frame, instant
+        start/stop) puts the hero rect over the key rect with >= 2px
+        overlap on both axes, without touching a hazard first. A
+        knife-edge sliver is NOT a proof. Missing array = [] (valid).
+        Error prefix `key:`. The rules are M1's coin rules copied to
+        keys (GATE-AMENDMENT-1 B1)."""
+        if not isinstance(self.lv, dict) or "keys" not in self.lv:
+            return
+        keys = self.lv["keys"]
+        if not isinstance(keys, list):
+            self.errors.append("key: keys must be an array")
+            return
+        tun = self.tun
+        W, H = tun.width, tun.floor_y
+        rects = []
+        for i, c in enumerate(keys):
+            if not isinstance(c, dict) or not is_num(c.get("x")) \
+                    or not is_num(c.get("y")):
+                self.errors.append(
+                    "key: keys[%d] must be {x, y} numbers "
+                    "(unknown entry shape)" % i)
+                rects.append(None)
+                continue
+            x, y = float(c["x"]), float(c["y"])
+            r = (x - KEY_R, y - KEY_R, 2 * KEY_R, 2 * KEY_R)
+            rects.append(r)
+            if x < 0 or x > W or y < 0 or y > H:
+                self.errors.append(
+                    "key: keys[%d] centre (%g,%g) outside bounds "
+                    "0..%g / 0..%g" % (i, x, y, W, H))
+            if r[1] < HUD_KEEPOUT_Y:
+                self.errors.append(
+                    "key: keys[%d] keep-out: drawn top y=%g < %g"
+                    % (i, r[1], HUD_KEEPOUT_Y))
+        # No overlap with hazards / spawn hero / door (area > 0).
+        blockers = []
+        for h in self.lv.get("hazards", []):
+            blockers.append(self._hazard_block_rect(h)
+                            if isinstance(h, dict) else None)
+        sp = self.lv.get("spawn")
+        hero = None
+        if isinstance(sp, dict) and is_num(sp.get("x")) \
+                and is_num(sp.get("y")):
+            hero = (float(sp["x"]) - HERO_RECT_W / 2.0,
+                    float(sp["y"]) - HERO_RECT_H,
+                    HERO_RECT_W, HERO_RECT_H)
+        try:
+            door = self.door_rect()
+        except Exception:
+            door = None
+        for i, r in enumerate(rects):
+            if r is None:
+                continue
+            for j, b in enumerate(blockers):
+                if b is not None and rects_overlap(r, b):
+                    self.errors.append(
+                        "key: keys[%d] overlaps hazards[%d] hazard rect"
+                        % (i, j))
+                    break
+            if hero is not None and rects_overlap(r, hero):
+                self.errors.append(
+                    "key: keys[%d] overlaps the spawn hero rect" % i)
+            if door is not None and rects_overlap(r, door):
+                self.errors.append(
+                    "key: keys[%d] overlaps the door rect" % i)
+        # Reachability: walk + jump trajectories, real discrete
+        # physics, >= 2px overlap on both axes.
+        tops = [r for r in self._rects() if r is not None]
+        for i, r in enumerate(rects):
+            if r is None:
+                continue
+            if not self._key_reachable(r, tops, blockers):
+                self.errors.append(
+                    "key: keys[%d] is not reachable from any "
+                    "platform (no walk/jump trajectory, real physics)"
+                    % i)
+
+    def _key_rect_overlap_dims(self, a, b):
+        w = min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0])
+        h = min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1])
+        if w > 0 and h > 0:
+            return w, h
+        return 0.0, 0.0
+
+    def _key_reachable(self, key_rect, tops, blockers):
+        """Best min(overlap w, overlap h) over all walk/jump
+        trajectories from any platform top; reachable iff >= 2px.
+        Mirrors godot/scripts/player.gd exactly (1/60 s steps,
+        vx instant, vy = -570 on the jump frame, gravity 3110).
+        MAX_FALL is tuning.json player.max_fall_speed (600); it is
+        not exposed on Tuning and never binds on these short falls."""
+        tun = self.tun
+        dt = 1.0 / 60.0
+        pw, ph = tun.player_w, tun.player_h
+        half_h = ph / 2.0
+        max_fall = 600.0
+        best = 0.0
+
+        def hero_rect(cx, cy):
+            return (cx - pw / 2.0, cy - half_h, pw, ph)
+
+        def hits_hazard(hr):
+            return any(b is not None and rects_overlap(hr, b)
+                       for b in blockers)
+
+        # (a) Walking: every platform top, both directions, 1px steps.
+        for (x0, y0, w0, _h0) in tops:
+            for (sx, step) in ((x0 + 8.0, 1.0), (x0 + w0 - 8.0, -1.0)):
+                cx = sx
+                cy = y0 - half_h
+                while x0 - pw / 2.0 <= cx <= x0 + w0 + pw / 2.0:
+                    hr = hero_rect(cx, cy)
+                    if hits_hazard(hr):
+                        break
+                    ow, oh = self._key_rect_overlap_dims(hr, key_rect)
+                    if ow > 0 and oh > 0:
+                        best = max(best, min(ow, oh))
+                        if best >= 2.0:
+                            return True
+                    cx += step
+        # (b) Jumps: every takeoff x (4px steps), vx in {+243, 0, -243}.
+        for (x0, y0, w0, _h0) in tops:
+            tx = x0 + 8.0
+            while tx <= x0 + w0 - 8.0:
+                for vx in (tun.run_speed, 0.0, -tun.run_speed):
+                    cx, cy = tx, y0 - half_h
+                    vy = float(tun.jump_v)
+                    for _frame in range(240):
+                        if _frame > 0:
+                            vy = min(vy + tun.gravity * dt, max_fall)
+                        feet_prev = cy + half_h
+                        cx += vx * dt
+                        cy += vy * dt
+                        feet_new = cy + half_h
+                        hr = hero_rect(cx, cy)
+                        if hits_hazard(hr):
+                            break
+                        ow, oh = self._key_rect_overlap_dims(hr, key_rect)
+                        if ow > 0 and oh > 0:
+                            best = max(best, min(ow, oh))
+                            if best >= 2.0:
+                                return True
+                        if vy > 0:
+                            landed = False
+                            for (ax, ay, aw, _ah) in tops:
+                                if feet_prev < ay <= feet_new \
+                                        and ax - pw / 2.0 <= cx <= ax + aw + pw / 2.0:
+                                    landed = True
+                                    break
+                            if landed:
+                                break
+                        if feet_new > tun.floor_y or cx < -50 \
+                                or cx > tun.width + 50:
+                            break
+                tx += 4.0
+        return best >= 2.0
 
     def door_rect(self):
         tun = self.tun
@@ -3559,8 +4027,8 @@ class LevelCheck:
             if isinstance(h, dict) and h.get("type") == "saw":
                 self.errors.append(
                     "family: hazards[%d] saw in spike-family archetype "
-                    "D%02d (rule 11: saws only in D03/D08/D09/D10/"
-                    "D33/D37/D41 + D26/D42/D43/D44)" % (i, archetype))
+                    "D%02d (rule 11: saws only in D11/D13/D14/D16/"
+                    "D17/D21/D28/D29/D33/D41/D43/D44)" % (i, archetype))
 
     def run(self, max_paths=300, with_connectivity=True):
         self.check_fields()
@@ -3575,6 +4043,8 @@ class LevelCheck:
                        self.check_hazard_solid_overlap,
                        self.check_density_floor,
                        self.check_decorations,
+                       self.check_coins,
+                       self.check_keys,
                        self.check_family_purity,
                        self.check_safe_zones_and_ground):
                 try:
@@ -3730,6 +4200,11 @@ SELFTESTS = [
     ("positive_chained_pair_48.json", True, None),
     ("negative_chained_pair_30.json", False, "chained-pair"),
     ("negative_column_past_ground_edge.json", False, "spiked_column"),
+    ("positive_floating_slab.json", True, None),
+    ("negative_floating_slab_narrow.json", False, "grounding"),
+    ("negative_floating_slab_thin.json", False, "grounding"),
+    ("negative_floating_slab_low.json", False, "grounding"),
+    ("negative_floating_slab_high.json", False, "grounding"),
 ]
 
 

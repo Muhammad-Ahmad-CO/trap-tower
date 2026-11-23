@@ -26,6 +26,18 @@ const DOOR_MIN_Y := 174.0
 const SHAFT_TOL := 8.0
 const REST_OVERLAP := 48.0
 const SWING_SAMPLES := 13
+# Rule 7 (v1.0.9 Lane A): floating main-floor slab exception — the
+# official game's floors ARE floating slabs. A solid rect is grounded
+# iff it is the level's designated main floor (widest solid; tie ->
+# lowest top on screen) AND w >= 800 AND h >= 100 AND top in
+# y 200..500. Identical bounds/designation in tools/check_levels.py
+# (main_floor_index / is_floating_slab) and the autopilot
+# (_main_floor_index / _main_floor_slab_ok): the three must never
+# drift. All other grounding rules unchanged.
+const SLAB_MIN_W := 800.0
+const SLAB_MIN_H := 100.0
+const SLAB_TOP_MIN_Y := 200.0
+const SLAB_TOP_MAX_Y := 500.0
 
 const PLATFORM_KINDS = ["solid", "dashed", "falling", "tilting", "moving"]
 const HAZARD_TYPES = ["spikes", "saw", "spiked_column", "hanging_pillar"]
@@ -80,6 +92,34 @@ static func validate_file(data: Dictionary, tuning: Dictionary) -> String:
 	return ""
 
 
+# Rule (e) exception, v1.0.9 Lane C3 — mirrors
+# tools/check_levels.py no_hazard_kind_exception exactly (the two
+# must never drift), EXTENDED by Lane F to D36: doors whose mechanic
+# set holds no hazard kind (MAPPING-V109.md §4: D06 {dashed},
+# D15 {dashed, moving}, D20 {moving, tilting}, D36 {dashed, falling})
+# may have zero hazards iff the level holds >= 3 platforms of its
+# door's mechanic kinds. Valid only while these doors' sets stay
+# hazard-free (MAPPING-AMENDMENTS.md A3).
+static func _no_hazard_kind_exception(lv: Dictionary) -> bool:
+	var varn := str(lv.get("variation", ""))
+	var kinds: Array = []
+	if varn.begins_with("D06S"):
+		kinds = ["dashed"]
+	elif varn.begins_with("D15S"):
+		kinds = ["dashed", "moving"]
+	elif varn.begins_with("D20S"):
+		kinds = ["moving", "tilting"]
+	elif varn.begins_with("D36S"):
+		kinds = ["dashed", "falling"]
+	else:
+		return false
+	var n := 0
+	for p in lv.get("platforms", []):
+		if typeof(p) == TYPE_DICTIONARY and kinds.has(str(p.get("kind", ""))):
+			n += 1
+	return n >= 3
+
+
 static func validate_level(lv: Dictionary, index: int, tuning: Dictionary) -> String:
 	for f in ["id", "palette", "spawn", "door", "platforms", "hazards", "template", "variation"]:
 		var e := _req(lv, f, "level")
@@ -101,11 +141,71 @@ static func validate_level(lv: Dictionary, index: int, tuning: Dictionary) -> St
 		return "platforms must be a non-empty array"
 	if typeof(lv["hazards"]) != TYPE_ARRAY:
 		return "hazards must be an array"
-	if (lv["hazards"] as Array).is_empty() and index >= 3:
+	if (lv["hazards"] as Array).is_empty() and index >= 3 \
+			and not _no_hazard_kind_exception(lv):
 		return "hazards may be empty only for the first 3 teaching levels"
-	# `decorations` is optional (missing = []): accepted as-is, never
-	# validated or warned on here (LEVEL_SCHEMA.md rule 10 is
-	# harness-only; the builder draws whatever array is present).
+	# `decorations` is optional (missing = []); when present it must
+	# be an array of {x, y, w, h} rects with an OPTIONAL `shape`
+	# ("rect" | "cloud" | "tree" | "hill" | "palm", default "rect").
+	# Unknown shape = hard error (Gate Amendment B5(i)). Bounds,
+	# attachment and overlap are rule 10, harness-only
+	# (tools/check_levels.py) — the runtime never warns on them.
+	if lv.has("decorations"):
+		var decos: Variant = lv["decorations"]
+		if typeof(decos) != TYPE_ARRAY:
+			return "decorations must be an array"
+		var di := 0
+		for d in decos:
+			var dwhere := "decorations[%d]" % di
+			if typeof(d) != TYPE_DICTIONARY:
+				return dwhere + " is not an object"
+			for f in ["x", "y", "w", "h"]:
+				var de := _req_num(d, f, dwhere, 0.0, false)
+				if de != "":
+					return de
+			if d.has("shape"):
+				var shp := str(d["shape"])
+				if not ["rect", "cloud", "tree", "hill", "palm"].has(shp):
+					return dwhere + ": unknown shape '" + shp + "' (hard error)"
+			di += 1
+	# Lane U1 (M1): `coins` is optional (missing = []): each entry
+	# must be {x, y} numbers inside the viewport — unknown entry shape
+	# is a hard error. Rule 8 keep-out (drawn extent y >= 90),
+	# hazard/spawn/door overlap and reachability are harness-only,
+	# enforced by tools/check_levels.py (same split as decorations).
+	if lv.has("coins"):
+		var coins: Variant = lv["coins"]
+		if typeof(coins) != TYPE_ARRAY:
+			return "coins must be an array"
+		var vp2: Dictionary = tuning.get("viewport", {"width": 1280, "height": 720})
+		var w2 := float(vp2.get("width", 1280))
+		var h2 := float(vp2.get("height", 720))
+		var ci := 0
+		for c in coins:
+			if typeof(c) != TYPE_DICTIONARY or not _is_num(c.get("x")) or not _is_num(c.get("y")):
+				return "coins[%d] must be {x, y} numbers" % ci
+			if float(c["x"]) < 0.0 or float(c["x"]) > w2 or float(c["y"]) < 0.0 or float(c["y"]) > h2:
+				return "coins[%d] outside viewport bounds" % ci
+			ci += 1
+	# Lane U4 (M2): `keys` is optional (missing = []): each entry
+	# must be {x, y} numbers inside the viewport — unknown entry shape
+	# is a hard error. Rule 8 keep-out (drawn extent y >= 90),
+	# hazard/spawn/door overlap and reachability are harness-only,
+	# enforced by tools/check_levels.py (same split as coins).
+	if lv.has("keys"):
+		var keys: Variant = lv["keys"]
+		if typeof(keys) != TYPE_ARRAY:
+			return "keys must be an array"
+		var vp3: Dictionary = tuning.get("viewport", {"width": 1280, "height": 720})
+		var w3 := float(vp3.get("width", 1280))
+		var h3 := float(vp3.get("height", 720))
+		var ki := 0
+		for k in keys:
+			if typeof(k) != TYPE_DICTIONARY or not _is_num(k.get("x")) or not _is_num(k.get("y")):
+				return "keys[%d] must be {x, y} numbers" % ki
+			if float(k["x"]) < 0.0 or float(k["x"]) > w3 or float(k["y"]) < 0.0 or float(k["y"]) > h3:
+				return "keys[%d] outside viewport bounds" % ki
+			ki += 1
 	var i := 0
 	for p in lv["platforms"]:
 		var e := _validate_platform(p, i, tuning)
@@ -345,6 +445,10 @@ static func _validate_geometry(lv: Dictionary, tuning: Dictionary) -> String:
 # - Path saws are checked at endpoints only, per the schema wording;
 #   the path interior is not sampled (exact for the y-extent, since
 #   the path is a straight segment).
+# - Hanging (Lane D patch, v1.0.9; mirrors check_levels.py): a solid
+#   is grounded if its top touches a grounded solid's bottom with
+#   >= 8px x-overlap (gap <= 4). Needed for L127's hanging blocks
+#   and the D32 hanging arch.
 # - Resting support must be GROUNDED solids, with the checker's
 #   combined-overlap rule: one support with >= 48px overlap, or both
 #   end regions on supports totalling >= 48px (gap <= 4).
@@ -365,6 +469,10 @@ static func _validate_geometry(lv: Dictionary, tuning: Dictionary) -> String:
 #   columns.
 # - Moving platforms: shaft-flanking uses the full sweep rect;
 #   resting uses the home rect.
+# - Rule 7 exception (v1.0.9 Lane A): a qualifying floating
+#   main-floor slab (widest solid, tie -> lowest top; w >= 800,
+#   h >= 100, top in y 200..500) is seeded grounded, exactly as in
+#   the checker (see _vis_main_floor_index / SLAB_* constants).
 static func validate_visual_rules(lv: Dictionary, tuning: Dictionary) -> Array[String]:
 	var out: Array[String] = []
 	var id := str(lv.get("id", "?"))
@@ -447,10 +555,37 @@ static func _vis_saw_centres(h: Dictionary) -> Array[Vector2]:
 # Fixpoint: a solid is grounded if it stands on the floor, rests on a
 # grounded solid, is pillar-connected to a grounded solid,
 # or has both ends touching grounded solids.
+# Rule 7 (v1.0.9 Lane A): a qualifying floating main-floor slab is
+# seeded as grounded before the fixpoint runs, exactly as in the
+# checker — so platforms resting on it ground normally, and a slab
+# that fails any bound is NOT seeded and warns exactly as before.
+static func _vis_main_floor_index(plats: Array) -> int:
+	var best := -1
+	for i in range(plats.size()):
+		if str(plats[i].get("kind", "")) != "solid":
+			continue
+		if best < 0:
+			best = i
+			continue
+		var r := _vis_rect(plats[i])
+		var b := _vis_rect(plats[best])
+		if r.size.x > b.size.x \
+				or (r.size.x == b.size.x and r.position.y > b.position.y):
+			best = i
+	return best
+
+
 static func _vis_grounded_flags(plats: Array, floor_y: float) -> Array:
 	var grounded: Array = []
 	for i in range(plats.size()):
 		grounded.append(false)
+	var slab := _vis_main_floor_index(plats)
+	if slab >= 0:
+		var r := _vis_rect(plats[slab])
+		if r.size.x >= SLAB_MIN_W and r.size.y >= SLAB_MIN_H \
+				and r.position.y >= SLAB_TOP_MIN_Y \
+				and r.position.y <= SLAB_TOP_MAX_Y:
+			grounded[slab] = true
 	var changed := true
 	var guard := 0
 	while changed and guard <= plats.size() + 1:
@@ -510,6 +645,19 @@ static func _vis_solid_grounded(i: int, plats: Array, grounded: Array, floor_y: 
 		if q2.position.x < r.position.x or q2.end.x > r.end.x:
 			continue
 		return true
+	# Hanging (Lane D patch, v1.0.9; mirrors check_levels.py
+	# _grounded_solids exactly): a grounded solid whose bottom touches
+	# this platform's top with >= 8px x-overlap (the platform hangs
+	# from the solid above). Needed for L127's hanging blocks and the
+	# D32 hanging arch. A floating support never grounds anything:
+	# only grounded[j] solids count.
+	for j in range(plats.size()):
+		if j == i or not grounded[j]:
+			continue
+		var q4 := _vis_rect(plats[j])
+		if absf(q4.end.y - r.position.y) <= GROUND_TOL \
+				and _vis_x_overlap(r, q4) >= 8.0:
+			return true
 	var left := false
 	var right := false
 	for j in range(plats.size()):

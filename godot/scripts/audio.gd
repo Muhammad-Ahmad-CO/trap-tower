@@ -121,6 +121,14 @@ static func play_skip() -> void:
 	_play(_skip_tone())
 
 
+# Lane U1 (M1): coin pickup — bright two-note chime (B5 -> E6),
+# distinct from skip (660 -> 880), jump (rising sweep), land (low
+# thud), death (falling sweep) and win (long rising sweep).
+static func play_coin() -> void:
+	_log_tone("coin")
+	_play(_coin_tone())
+
+
 static func _apply_settings() -> void:
 	var bus := AudioServer.get_bus_index("Master")
 	if bus >= 0:
@@ -193,6 +201,13 @@ static func _play(stream: AudioStreamWAV) -> void:
 static var _jump_stream: AudioStreamWAV = null
 static var _land_stream: AudioStreamWAV = null
 static var _skip_stream: AudioStreamWAV = null
+static var _coin_stream: AudioStreamWAV = null
+
+
+static func _coin_tone() -> AudioStreamWAV:
+	if _coin_stream == null:
+		_coin_stream = _make_two_note(0.06, 988.0, 1319.0, 0.45)
+	return _coin_stream
 
 
 static func _jump_tone() -> AudioStreamWAV:

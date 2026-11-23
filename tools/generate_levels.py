@@ -630,6 +630,12 @@ def _grounded_solids_gen(plats, floor_y):
     floor, resting, pillar-connected, both-ends-touching)."""
     rects = [_pr(p) for p in plats]
     grounded = set()
+    # LANE D patch (mirror of the checker's rule-7 floating-slab
+    # exception): seed the designated main floor so repair_grounding
+    # does not add support pillars under it.
+    _ok_slab, _idx_slab = check_levels.is_floating_slab(plats, rects)
+    if _ok_slab:
+        grounded.add(_idx_slab)
     changed = True
     while changed:
         changed = False
@@ -650,6 +656,18 @@ def _grounded_solids_gen(plats, floor_y):
                             and q[0] + q[2] <= r[0] + r[2]:
                         ok = True
                         break
+            if not ok:
+                # Hanging (mirror of the checker's hanging rule; LANE D
+                # patch): a grounded solid whose bottom touches this
+                # platform's top with >= 8px x-overlap.
+                for j in grounded:
+                    q = rects[j]
+                    if abs((q[1] + q[3]) - r[1]) <= _GTOL:
+                        ov = min(q[0] + q[2], r[0] + r[2]) \
+                            - max(q[0], r[0])
+                        if ov >= 8.0:
+                            ok = True
+                            break
             if not ok:
                 left = right = False
                 for j in grounded:
@@ -5064,9 +5082,10 @@ def v3_d31(c, kk, salt, slot, variant):
 # chained same-platform up-strip pairs at gap 55 (w <= 45, so
 # W_chain >= 15 by the exact formula; w50 pairs, where used, sit
 # at gap 48..51); D31 teeth UNCHANGED (not touched here); no
-# dotted_line anywhere; no decorations; saws ONLY in saw-family +
-# mix/final doors (D03/D08/D09/D10/D33/D37/D41 + D26/D42/D43/D44)
-# per rule 11 -- legacy b_* builders put static/path saws in
+# dotted_line anywhere; no decorations; saws ONLY in saw-family
+# doors (D11/D13/D14/D16/D17/D21/D28/D29/D33/D41/D43/D44)
+# per rule 11 (v1.0.9, ENFORCED) -- legacy b_* builders put
+# static/path saws in
 # spike-family D20/D22/D23 too; the v3 versions of those doors
 # carry strips/columns/pillars instead, never saws.
 #
@@ -5601,6 +5620,44 @@ def v3_d04(c, kk, salt, slot, variant):
                    _vt(bx + 810, 600, 40)]
         spawn, door = (80, 640), (1210, 640)
         return plats + [_fp(c)], hazards, spawn, door, skel
+
+
+# ---------------------------------------------------------------------------
+# Lane U1 (M1, v1.0.9): D04 coin placements for the SHIPPED v109 levels.
+# The shipped D04 geometry (floor top y=285, splice-v8) is NOT produced
+# by v3_d04 above (different coordinate space: generator floor y=640)
+# — it is splice-owned. This table is the single source of truth for
+# the D04 coin splice: the splice script reads d04_coins(level_id)
+# and attaches the coins to the shipped levels.json. Keyed by SHIPPED
+# level id, never by generator slot. Do NOT apply to generator-built
+# D04 levels. Proven per coin by lane-u1/scratch/prove_coins.py
+# (real discrete physics, worst min-overlap 15.0px) and enforced by
+# tools/check_levels.py check_coins.
+#   L015: 7-coin row over the gap (official M4 pattern).
+#   L016: stair-path coins + vertical coin column over the upper slab.
+#   L017: 7-coin row over the gap + stair-path coins.
+#   L018: 5-coin row over each of the two gaps.
+#   L019: stair-path coins + vertical column + upper-slab row.
+# ---------------------------------------------------------------------------
+
+V109_D04_COINS_BY_LEVEL_ID = {
+    "L015": [(570, 245), (590, 245), (610, 245), (630, 245),
+             (650, 245), (670, 245), (690, 245)],
+    "L016": [(400, 215), (520, 170), (600, 170), (600, 140), (600, 112)],
+    "L017": [(450, 245), (470, 245), (490, 245), (510, 245),
+             (530, 245), (550, 245), (570, 245),
+             (980, 215), (1100, 170)],
+    "L018": [(410, 245), (430, 245), (450, 245), (470, 245), (490, 245),
+             (810, 245), (830, 245), (850, 245), (870, 245), (890, 245)],
+    "L019": [(320, 215), (440, 170), (600, 170), (600, 140), (600, 112),
+             (850, 170), (950, 170)],
+}
+
+
+def d04_coins(level_id):
+    """Coin [{x, y}] list for a SHIPPED v109 D04 level id, [] otherwise."""
+    return [{"x": x, "y": y}
+            for (x, y) in V109_D04_COINS_BY_LEVEL_ID.get(level_id, [])]
 
 
 # ---------------------------------------------------------------------------
@@ -8578,6 +8635,26 @@ def _assert_column_span(hazards, tun, plats=None):
             if hung:
                 continue
         w, hh = float(h["w"]), float(h["h"])
+        # LANE D patch: a tall column STANDING on a solid top is
+        # a floor column the route threads BETWEEN (D25 colF), not an
+        # obstacle to jump over — the checker's path-dependent span test
+        # is the arbiter, so skip the unconditional generator raise.
+        if hh > check_levels.ENVELOPE_MAX_RISE and plats:
+            _bot = float(h["y"]) + hh
+            _stands = False
+            for _s in plats:
+                if not isinstance(_s, dict) or _s.get("kind") != "solid":
+                    continue
+                if abs(_bot - float(_s["y"])) <= check_levels.GROUND_TOL:
+                    _ov = min(float(h["x"]) + w, float(_s["x"]) + float(_s["w"])) - \
+                        max(float(h["x"]), float(_s["x"]))
+                    if _ov >= 8.0:
+                        _stands = True
+                        break
+            if _stands:
+                print("lane-d: tall floor column h=%g deferred to checker"
+                      % hh, file=sys.stderr)
+                continue
         if hh > check_levels.ENVELOPE_MAX_RISE:
             raise ValueError(
                 "spiked_column hazards[%d] h=%g > 45 (max rise)"

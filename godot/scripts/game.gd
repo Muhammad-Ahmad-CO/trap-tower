@@ -61,6 +61,13 @@ var touch_right := false
 var touch_jump := false
 var _win_delay := -1.0
 var _win_saved := false
+# Lane M11 (v1.0.9, SKEPTIC C1(i)): re-entrancy guard for
+# _exit_to_map — a second exit call (double-tap back, back + ESC,
+# back + pause-exit) returns immediately. The flag resets with the
+# scene (the scene is freed on change), so legitimate sequential
+# exits are unaffected. Also closes the pre-existing pause-exit /
+# ESC double-fire as an intended side effect.
+var _exiting := false
 var _wipe_started := false
 var _error := false
 var _last_deaths := 0
@@ -76,11 +83,28 @@ var _hero_beat := -1.0
 var _star: TTStar = null
 var _star_id := ""
 var _is_bonus := false
+# Lane U1: coins in this level (built by TTBuilder from the level
+# dict) + their save ids ("L015:0" = level id + coin index), parallel
+# arrays. Empty when the level has no coins.
+var _coins: Array = []
+var _coin_ids: Array = []
+# Lane U4: keys in this level (spawned by _spawn_key from the level
+# dict) + their save ids ("L016:0" = level id + key index), parallel
+# arrays. Empty when the level has no key (most levels have none).
+var _keys: Array = []
+var _key_ids: Array = []
 # Lane F2: daily challenge / nightmare mode for this run (from
 # TTState; set in _ready, never changed mid-run).
 var _is_daily := false
 var _daily_date := ""
 var _is_nightmare := false
+# Lane U5 (M4 speedrun) — applied after U4's chapter API landed
+# (see M4-SPEEDRUN-STUB.md). _speedrun_next is the level index
+# to auto-advance to on a mid-run win (-1 = run over / not a run).
+var _is_speedrun := false
+var _speedrun_chapter := 0
+var _speedrun_time := 0.0
+var _speedrun_next := -1
 
 
 func _ready() -> void:
@@ -90,6 +114,10 @@ func _ready() -> void:
 	_is_daily = TTState.daily
 	_daily_date = TTState.daily_date
 	_is_nightmare = TTState.nightmare
+	# Lane U5 STUB (M4): a run is active when the map set the
+	# chapter carrier before changing scenes.
+	_is_speedrun = TTState.speedrun_chapter > 0
+	_speedrun_chapter = TTState.speedrun_chapter
 	var loaded: Dictionary
 	if _is_daily:
 		# Daily challenge: one generated level, not levels.json.
@@ -149,6 +177,10 @@ func _build_from_dict(level: Dictionary, p_tuning: Dictionary, index: int) -> vo
 	controls = null
 	_star = null
 	_star_id = ""
+	_coins = []
+	_coin_ids = []
+	_keys = []
+	_key_ids = []
 	_pause_overlay = null
 	_death_label = null
 	_death_burst = null
@@ -188,6 +220,17 @@ func _build_from_dict(level: Dictionary, p_tuning: Dictionary, index: int) -> vo
 		if player != null:
 			player.apply_skin(TTSkins.skin_by_id(str(_prog.get("selected_skin", "default"))))
 		_spawn_star(str(level.get("id", "")), _prog)
+	# Lane U1: filter (hide) coins — runs in every mode, including
+	# the verifier path, so nightmare coins never show misplaced.
+	_filter_coins(str(level.get("id", "")))
+	# Lane U4: spawn this level's hidden key (if any). Runs in every
+	# mode, including the verifier path, so the key-visibility probe
+	# sees it drawn; _spawn_key itself hides already-collected keys
+	# (real play) and all keys in nightmare mode (TTNightmare.apply
+	# mirrors platforms/hazards but not the `keys` array, so a
+	# nightmare key would sit at normal-mode x over mirrored
+	# geometry — same treatment as U1's coins).
+	_spawn_key(level)
 	# Lane F3 ghost: the saved best-run path for this level, drawn
 	# by a visual-only Node2D (no collision, no gameplay effect).
 	# Empty when no best run exists yet (first play of the level).
@@ -197,16 +240,53 @@ func _build_from_dict(level: Dictionary, p_tuning: Dictionary, index: int) -> vo
 	_ghost_node.set_samples(TTProgress.load_ghost(str(level.get("id", ""))))
 	_ghost_node.set_ghost_visible(_ghost_on)
 	hud = TTHUD.new()
-	var mode_text := "DAILY" if _is_daily else ("NIGHTMARE" if _is_nightmare else "")
-	hud.setup(pal, index + 1, not _ghost_node.samples.is_empty(), _ghost_on, mode_text)
+	var mode_text := "DAILY" if _is_daily else ("NIGHTMARE" if _is_nightmare else ("SPEEDRUN" if _is_speedrun else ""))  # Lane U5 STUB (M4): speedrun mode tag.
+	# Lane A (v1.0.9): door-progress pips — filled = completed
+	# stages in this level's door (from the save; 0 when stats are
+	# not persisted, e.g. verifier runs). Door stage count is 5
+	# except D03 (4) and D44 (1).
+	var door := TTDoorMap.door_of(index)
+	var door_stages: Array = TTDoorMap.door_levels(door)
+	var pips_filled := 0
+	# Lane U4: skull n/5 for this level's chapter (from the save; 0
+	# when stats are not persisted, e.g. verifier runs; daily/bonus
+	# runs are not chapter levels, so they show 0/5).
+	var keys_found := 0
+	var keys_total := 5
+	if persist_stats:
+		var _prog_p := TTProgress.load_progress()
+		var done_p: Array = _prog_p.get("completed", [])
+		for idx in door_stages:
+			if done_p.has("L%03d" % (int(idx) + 1)):
+				pips_filled += 1
+		if not _is_daily and not _is_bonus:
+			var kch := TTFeatures.chapter_of_level_index(index)
+			keys_found = TTFeatures.chapter_keys_collected(_prog_p, kch)
+			keys_total = TTFeatures.chapter_keys_total(kch)
+	hud.setup(pal, index + 1, not _ghost_node.samples.is_empty(), _ghost_on, mode_text, pips_filled, door_stages.size(), keys_found, keys_total)
+	# Lane U5 STUB (M4): the run timer shows from the first frame of
+	# a run (and again after every auto-advance rebuilds the HUD).
+	if _is_speedrun:
+		hud.show_speedrun_timer(true)
 	hud.pause_pressed.connect(_on_pause_button)
 	hud.restart_pressed.connect(restart_level)
+	hud.back_pressed.connect(_on_back_button)
 	hud.skip_pressed.connect(_on_skip_pressed)
 	hud.ghost_toggled.connect(_set_ghost_visible)
 	add_child(hud)
 	var controls_scene: PackedScene = load("res://scenes/touch_controls.tscn")
 	controls = controls_scene.instantiate() as TTTouchControls
-	controls.setup(p_tuning, pal)
+	# Lane A2 (v1.0.9): pass the level's SOLID platform rects so each
+	# button's press fill can contrast with the majority surface
+	# under that button (>=50% over solid -> BG colour, else SOLID
+	# colour). Only kind "solid" counts; dashed/tilting/moving
+	# platforms are not solid surfaces.
+	var solids: Array = []
+	for p in (level.get("platforms", []) as Array):
+		var pd := p as Dictionary
+		if str(pd.get("kind", "")) == "solid":
+			solids.append(Rect2(float(pd.get("x", 0)), float(pd.get("y", 0)), float(pd.get("w", 0)), float(pd.get("h", 0))))
+	controls.setup(p_tuning, pal, solids)
 	# Pause contract: finger tracking must stay correct across pause.
 	controls.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(controls)
@@ -236,6 +316,33 @@ func _build_from_dict(level: Dictionary, p_tuning: Dictionary, index: int) -> vo
 	_wipe_started = false
 
 
+# Lane U1: hide coins that must not show. The builder builds every
+# coin in the level dict unconditionally (so the verifier/Xvfb probe
+# sees them drawn); this pass only HIDES: already-collected coins in
+# real play (persisted in coins_collected), and ALL coins in
+# nightmare mode — TTNightmare.apply mirrors platforms/hazards but
+# does not mirror the `coins` array, so nightmare coins would sit at
+# normal-mode x over mirrored geometry. Hiding them is the safe
+# choice until nightmare.gd mirrors coins (coordinator follow-up);
+# coins are optional and never gate the door.
+func _filter_coins(level_id: String) -> void:
+	_coins = []
+	_coin_ids = []
+	if builder == null:
+		return
+	var done: Array = []
+	if persist_stats:
+		done = TTProgress.load_progress().get("coins_collected", [])
+	for i in range(builder.coins.size()):
+		var node = builder.coins[i]
+		var cid := level_id + ":" + str(i)
+		_coins.append(node)
+		_coin_ids.append(cid)
+		if _is_nightmare or done.has(cid):
+			node.collected = true
+			node.visible = false
+
+
 # Lane F1: spawn this level's hidden star (if any and not already
 # collected). The star is a plain Node2D under the level runtime:
 # no collision, no physics — the game polls its rect each frame.
@@ -251,6 +358,38 @@ func _spawn_star(level_id: String, prog: Dictionary) -> void:
 	_star.setup(pos)
 	_star_id = level_id
 	runtime.add_child(_star)
+
+
+# Lane U4: spawn this level's hidden key(s) from the level dict
+# (`keys: [{x, y}]`, 15 levels, 5 per chapter). A plain Node2D under
+# the level runtime, like the star: no collision, no physics — the
+# game polls its rect each frame. Hidden in nightmare mode (the
+# `keys` array is not mirrored) and when already collected (real
+# play only — the verifier path has persist_stats false, so gates
+# always see the key drawn). Missing array = no key.
+func _spawn_key(level: Dictionary) -> void:
+	_keys = []
+	_key_ids = []
+	if _is_nightmare:
+		return
+	var level_id := str(level.get("id", ""))
+	var done: Array = []
+	if persist_stats:
+		done = TTProgress.load_progress().get("keys_collected", [])
+	var i := 0
+	for k in level.get("keys", []):
+		if typeof(k) != TYPE_DICTIONARY:
+			i += 1
+			continue
+		var node := TTKey.new()
+		node.setup(Vector2(float(k.get("x", 0.0)), float(k.get("y", 0.0))))
+		runtime.add_child(node)
+		_keys.append(node)
+		_key_ids.append(level_id + ":" + str(i))
+		if done.has(level_id + ":" + str(i)):
+			node.collected = true
+			node.visible = false
+		i += 1
 
 
 func _build_death_label() -> void:
@@ -344,7 +483,15 @@ func _physics_process(_delta: float) -> void:
 	if deaths > _last_deaths:
 		_last_deaths = deaths
 		if persist_stats:
-			TTProgress.record_death()
+			# Lane U4: count the death under this level's chapter
+			# too (M8 shows the chapter death count). Daily/bonus
+			# runs are not chapter levels, so they pass no chapter
+			# (global `deaths` only). Nightmare IS the same 215
+			# levels, so its deaths count toward the chapter.
+			var death_chapter := -1
+			if not _is_daily and not _is_bonus:
+				death_chapter = TTFeatures.chapter_of_level_index(level_index)
+			TTProgress.record_death(death_chapter)
 		TTAudio.play_death()
 		# Death particle burst at the hero's death position, then the
 		# TAP TO RETRY prompt (schema: burst first, prompt after).
@@ -372,6 +519,12 @@ func _physics_process(_delta: float) -> void:
 		while _rec_timer >= TTGhost.SAMPLE_DT and _ghost_rec.size() < TTGhost.MAX_SAMPLES:
 			_rec_timer -= TTGhost.SAMPLE_DT
 			_ghost_rec.append(Vector3(player.global_position.x, player.global_position.y, float(player.facing)))
+	# Lane U5 STUB (M4): speedrun clock — runs through deaths (a
+	# race clock does not stop when you die) and never resets mid-run.
+	if _is_speedrun and not level_completed:
+		_speedrun_time += _delta
+		if hud != null and is_instance_valid(hud):
+			hud.set_speedrun_time(_speedrun_time)
 	if controls != null and player != null and is_instance_valid(player):
 		var st := controls.get_input_state()
 		touch_left = bool(st["left"])
@@ -393,6 +546,47 @@ func _physics_process(_delta: float) -> void:
 			TTProgress.check_achievements(_level_ids)
 			TTAudio.play_skip()
 			_star = null
+	# Lane U1 coins: collect on touch. The poll runs in every mode
+	# (verifier/probe included — the coins are drawn there too); only
+	# the PERSIST is gated on persist_stats, so gate runs never write
+	# the player's save. Collecting is optional: it never gates the
+	# door/exit. Already-collected / nightmare-hidden coins have
+	# collected == true and are skipped here.
+	for i in range(_coins.size()):
+		var cn = _coins[i]
+		if cn == null or not is_instance_valid(cn) or cn.collected:
+			continue
+		if player != null and is_instance_valid(player) \
+				and not runtime.dead and not level_completed \
+				and player.player_rect().intersects(cn.collect_rect()):
+			cn.collected = true
+			cn.visible = false
+			TTAudio.play_coin()
+			if persist_stats:
+				TTProgress.collect_coin(str(_coin_ids[i]))
+	# Lane U4 keys: collect on touch. Same shape as the coin poll:
+	# runs in every mode (verifier/probe included — the keys are
+	# drawn there too); only the PERSIST is gated on persist_stats,
+	# so gate runs never write the player's save. Collecting is
+	# optional: it never gates the door/exit. Already-collected /
+	# nightmare-hidden keys have collected == true and are skipped
+	# here. The pickup reuses the star/skip chime (no new audio —
+	# audio.gd is Lane U1's file; a distinct play_key is a trivial
+	# follow-up there).
+	for i in range(_keys.size()):
+		var kn = _keys[i]
+		if kn == null or not is_instance_valid(kn) or kn.collected:
+			continue
+		if player != null and is_instance_valid(player) \
+				and not runtime.dead and not level_completed \
+				and player.player_rect().intersects(kn.collect_rect()):
+			kn.collected = true
+			kn.visible = false
+			TTAudio.play_skip()
+			if persist_stats:
+				TTProgress.collect_key(str(_key_ids[i]))
+			if hud != null and is_instance_valid(hud):
+				hud.bump_keys()
 	if runtime.level_completed and not _win_saved:
 		_win_saved = true
 		TTAudio.play_win()
@@ -421,12 +615,37 @@ func _physics_process(_delta: float) -> void:
 				TTNightmare.record_win(str(current_level.get("id", "")))
 				TTState.return_door = TTDoorMap.door_of(level_index)
 			else:
+				# Lane U4 (M8): chapter-complete detection. A normal
+				# win can complete a whole chapter (the player may
+				# play doors out of order, so the completing win is
+				# not necessarily on the final door). Fire only on
+				# the transition not-complete -> complete, so
+				# replaying a level in an already-complete chapter
+				# never re-shows the screen. The map consumes
+				# TTState.chapter_complete and opens the M8 overlay
+				# instead of the door picker.
+				var win_chapter := TTFeatures.chapter_of_level_index(level_index)
+				var was_complete := TTFeatures.chapter_complete(TTProgress.load_progress(), win_chapter, _level_ids)
 				TTProgress.complete_level(str(current_level.get("id", "")), level_index, levels.size())
+				if not was_complete and TTFeatures.chapter_complete(TTProgress.load_progress(), win_chapter, _level_ids):
+					TTState.chapter_complete = win_chapter
 				# v1.0.5: return to this level's door picker (on the map),
 				# set BEFORE the win delay — never auto-advance to a level.
 				TTState.return_door = TTDoorMap.door_of(level_index)
 				# A normal win can be the 215th: unlock Nightmare.
 				TTNightmare.refresh_unlock()
+			# Lane U5 (M4): mid-run win — same chapter's next
+			# level auto-advances; the chapter's last level ends the
+			# run and records the best (chapter_of_door is U4's API).
+			if _is_speedrun:
+				var next_idx := level_index + 1
+				var same_chapter := next_idx < levels.size() and TTFeatures.chapter_of_door(TTDoorMap.door_of(next_idx)) == _speedrun_chapter
+				if same_chapter:
+					_speedrun_next = next_idx
+				else:
+					TTProgress.record_speedrun_best(_speedrun_chapter, _speedrun_time)
+					_speedrun_next = -1
+					TTState.speedrun_chapter = 0
 			_win_delay = 0.9
 			_wipe_started = false
 		if persist_stats and not _is_bonus:
@@ -477,6 +696,15 @@ func _process(delta: float) -> void:
 	_win_delay = -1.0
 	get_tree().paused = false
 	_paused = false
+	# Lane U5 STUB (M4): mid-run win — rebuild the next chapter level
+	# in place instead of returning to the map. The run clock
+	# (_speedrun_time) is NOT reset by _build_from_dict.
+	if _is_speedrun and _speedrun_next >= 0:
+		var nxt := _speedrun_next
+		_speedrun_next = -1
+		level_index = nxt
+		_build_from_dict(levels[nxt], tuning, nxt)
+		return
 	# Win and skip both return to the map. There is no auto-chain
 	# into the next level.
 	get_tree().change_scene_to_file("res://scenes/map.tscn")
@@ -546,6 +774,22 @@ func _on_pause_button() -> void:
 		pause_game()
 
 
+func _on_back_button() -> void:
+	# Lane M11 (v1.0.9, SKEPTIC C1(ii)): win-delay guard mirroring
+	# _on_skip_pressed — a back tap during the 0.9 s win delay is a
+	# no-op; the win path is already returning to the map. NOTE: the
+	# levels.is_empty() clause of _on_skip_pressed is deliberately
+	# NOT mirrored — a verifier-built single level (levels empty)
+	# must still be able to exit to the map.
+	# The button is clickable while paused (HUD PROCESS_MODE_ALWAYS,
+	# z 100 above the pause overlay z 90) — intended: direct exit
+	# from pause. _exit_to_map unpauses itself, so no resume call
+	# is needed here.
+	if _win_saved or _win_delay >= 0.0:
+		return
+	_exit_to_map()
+
+
 func _on_skip_pressed() -> void:
 	if levels.is_empty() or _win_saved or _win_delay >= 0.0:
 		return
@@ -579,6 +823,10 @@ func _on_skip_pressed() -> void:
 
 
 func _exit_to_map() -> void:
+	# Lane M11 C1(i): re-entrancy guard — see _exiting declaration.
+	if _exiting:
+		return
+	_exiting = true
 	# v1.0.5: pause exit / ESC exit returns to a PLAIN map — no picker.
 	_flush_session_time()
 	TTState.return_door = -1
